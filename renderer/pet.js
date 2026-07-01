@@ -261,6 +261,20 @@ function updateSubmitEnabled() {
   askSubmit.classList.toggle('disabled', !ok);
 }
 
+// 自定义输入为空时按回车：不发送，抖一下 + 提示别忘了填（2.6s 后复原 placeholder）
+let emptyWarnTimer = null;
+function warnEmptyInput() {
+  askText.focus();
+  askText.classList.add('warn');
+  if (!askText.dataset.ph) askText.dataset.ph = askText.placeholder || '输入自定义回答…';
+  askText.placeholder = '⚠️ 还没输入内容，是不是忘了填？';
+  clearTimeout(emptyWarnTimer);
+  emptyWarnTimer = setTimeout(() => {
+    askText.classList.remove('warn');
+    if (askText.dataset.ph) { askText.placeholder = askText.dataset.ph; delete askText.dataset.ph; }
+  }, 2600);
+}
+
 function elicNextOrSubmit(c) {
   const qs = elic.questions;
   const q = qs[elic.qIdx];
@@ -1063,6 +1077,16 @@ askSubmit.addEventListener('click', () => { const c = askQueue[askIdx]; if (c &&
 askBack.addEventListener('click', () => { const c = askQueue[askIdx]; if (c && c.kind === 'ask') elicBack(c); });
 askTerm.addEventListener('click', () => { const c = askQueue[askIdx]; if (c) gotoSession(c); });
 askText.addEventListener('input', () => updateSubmitEnabled());
+// 自定义输入里按回车直接发送（仅 elicitation）；空内容不发、提示别忘了填
+askText.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const c = askQueue[askIdx];
+  if (!c || !elic) return;
+  if (!(askText.value || '').trim()) { warnEmptyInput(); return; }
+  if (askSubmit.classList.contains('disabled')) { warnEmptyInput(); return; }
+  elicNextOrSubmit(c);
+});
 // 鼠标在面板上 = 交互中（配合 isInteracting 冻结轮询）
 askEl.addEventListener('pointerenter', () => { askHover = true; });
 askEl.addEventListener('pointerleave', () => { askHover = false; });
