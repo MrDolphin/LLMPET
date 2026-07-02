@@ -10,7 +10,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog } = require('electron');
 
 // Give the dev app a distinct identity ("octopus") so it isn't shown as a generic
 // "Electron" window and can never be confused with the abandoned "Claude小章鱼" build.
@@ -28,6 +28,7 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { launchClaude } = require('./backend/launch');
+const transport = require('./backend/transport');
 
 const PRELOAD = path.join(__dirname, 'preload.js');
 const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
@@ -439,15 +440,55 @@ function migrateState() {
 }
 
 // ── lifecycle ─────────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
-  if (process.platform === 'darwin' && app.dock) app.dock.hide();
-  migrateState();
-  registerIpc();
-  bootBackend();
-  createPetWindow();
-  try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
-  log('main', 'Octopus ready');
-});
+// 多实例防护（对齐 clawd-on-desk 的处理）：
+//  1) Electron 实例锁：同一份 app 重复启动 → 新实例静默退出；
+//  2) 启动探测：候选端口上已有同身份 server 在跑（多为另一份代码副本）→ 提示并退出；
+//  3) server.js 里的 runtime 守护：存活期间 runtime.json 被别的副本覆盖 → 抢回。
+// 开发需要多开时用 OCTOPUS_ALLOW_MULTI=1 跳过 1/2。
+const allowMulti = process.env.OCTOPUS_ALLOW_MULTI === '1';
+
+// 并行探测所有候选端口，找到任一存活的同身份 server 就返回其端口
+function findRivalInstance() {
+  if (allowMulti) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let pending = transport.PORTS.length;
+    let found = null;
+    for (const p of transport.PORTS) {
+      transport.probe(p, 600, (ok) => {
+        if (ok && found === null) found = p;
+        if (--pending === 0) resolve(found);
+      });
+    }
+  });
+}
+
+const gotTheLock = allowMulti ? true : app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  log('main', 'another instance holds the lock — quitting');
+  app.quit();
+} else {
+  app.on('second-instance', () => { try { if (petWin) petWin.show(); } catch {} });
+  app.whenReady().then(async () => {
+    if (process.platform === 'darwin' && app.dock) app.dock.hide();
+    const rival = await findRivalInstance();
+    if (rival) {
+      log('main', `another octopus server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
+      dialog.showErrorBox(
+        'Octopus 已在运行',
+        `检测到另一个 Octopus 实例正在端口 ${rival} 上服务（可能来自其他代码副本）。\n` +
+        '本实例将退出，避免抢占会话事件。\n开发需要多开时：OCTOPUS_ALLOW_MULTI=1'
+      );
+      app.quit();
+      return;
+    }
+    migrateState();
+    registerIpc();
+    bootBackend();
+    createPetWindow();
+    try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
+    log('main', 'Octopus ready');
+  });
+}
 
 app.on('window-all-closed', () => { /* tray app: stay alive */ });
 

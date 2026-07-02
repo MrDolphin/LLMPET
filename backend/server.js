@@ -13,6 +13,7 @@ const {
   SERVER_ID,
   BASE_PORT,
   getPortCandidates,
+  readRuntimePort,
   writeRuntimeConfig,
   clearRuntimeConfig,
 } = require('./transport');
@@ -226,15 +227,38 @@ function createServer(deps) {
       activePort = ports[idx];
       writeRuntimeConfig(activePort);
       log('server', `listening on 127.0.0.1:${activePort}`);
+      startRuntimeGuard();
     });
 
     server.listen(ports[idx], '127.0.0.1');
   }
 
+  // 守护 runtime.json：别的代码副本（同一套 transport 的旧版/分叉）启动时会把
+  // runtime 覆盖成自己的端口，hook 流量随之被劫走。存活期间发现记录不是自己
+  // 就抢回来 —— 先到者赢。
+  let runtimeGuard = null;
+  function startRuntimeGuard() {
+    stopRuntimeGuard();
+    runtimeGuard = setInterval(() => {
+      if (!activePort) return;
+      const p = readRuntimePort();
+      if (p !== activePort) {
+        log('server', `runtime.json points to ${p} (another instance?) — reasserting ${activePort}`);
+        writeRuntimeConfig(activePort);
+      }
+    }, 15000);
+    if (runtimeGuard.unref) runtimeGuard.unref();
+  }
+  function stopRuntimeGuard() {
+    if (runtimeGuard) { clearInterval(runtimeGuard); runtimeGuard = null; }
+  }
+
   function getPort() { return activePort; }
 
   function stop() {
-    clearRuntimeConfig();
+    stopRuntimeGuard();
+    // 只清掉指向自己的记录，避免误删另一个存活实例刚写的端口
+    if (readRuntimePort() === activePort) clearRuntimeConfig();
     if (server) { try { server.close(); } catch {} server = null; }
   }
 
