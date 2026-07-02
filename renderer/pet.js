@@ -4,6 +4,7 @@ const stage = document.getElementById('stage');
 const pixel = document.getElementById('pixel');
 const mascot = document.getElementById('mascot');
 const mascotImg = document.getElementById('mascot-img');
+const cat = document.getElementById('cat');
 
 // 图标款按状态换眼神（每种状态一张只改眼睛的图）
 const MASCOT_EYES = {
@@ -21,6 +22,30 @@ function updateMascotEyes(s) {
   if (!mascotImg) return;
   const f = MASCOT_EYES[s] || 'mascot.png';
   if (!mascotImg.getAttribute('src').endsWith(f)) mascotImg.src = '../assets/' + f;
+}
+
+// 月薪喵（cat）：每个状态一张 meme GIF（原作者：抖音 @月薪喵）
+const catImg = document.getElementById('cat-img');
+const CAT_STATES = {
+  idle: 'cat-idle.gif',           // 靠椅放空：待命
+  roam: 'cat-roam.gif',           // 拿手机溜达：闲逛
+  working: 'cat-working.gif',     // 戴耳机敲代码「熬夜冠军」：干活
+  thinking: 'cat-thinking.gif',   // 托腮沉思：思考
+  talking: 'cat-talking.gif',     // 拿手机絮叨：回应中
+  juggling: 'cat-juggling.gif',   // 屏幕光里多线操作：并行子任务
+  sweeping: 'cat-sweeping.gif',   // 喷消毒水打扫：压缩/清理
+  waiting: 'cat-waiting.gif',     // 冒汗紧张等待：等你授权
+  needsinput: 'cat-needsinput.gif', // 摊手一脸问号：等你回复
+  happy: 'cat-happy.gif',         // 咧嘴大笑：完成庆祝
+  greet: 'cat-greet.gif',         // 猛拍「上号」：打招呼
+  attention: 'cat-attention.gif', // 猛回头警觉：需要注意
+  sleeping: 'cat-sleeping.gif',   // 蜷成一团睡着：睡觉
+  error: 'cat-error.gif',         // 电脑蓝屏瘫坐：出错
+};
+function updateCat(s) {
+  if (!catImg) return;
+  const f = CAT_STATES[s] || CAT_STATES.idle;
+  if (!catImg.getAttribute('src').endsWith(f)) catImg.src = '../assets/cat/' + f;
 }
 const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');
@@ -652,7 +677,7 @@ let lastBgZombie = 0; // 后台疑似僵尸数
 let radialOpen = false;
 
 const IDLE_SLEEP_MS = 6 * 60 * 1000;
-const stateEls = [pixel, mascot].filter(Boolean);
+const stateEls = [pixel, mascot, cat].filter(Boolean);
 const DEBUG_STATE = null; // 调试用：强制某状态（如 'sleeping'）；正常运行设为 null
 const DEBUG_CONFETTI = false; // 临时：定时放彩带验证；验证完改回 false
 
@@ -713,6 +738,7 @@ function setState(s) {
   // 注意：不要在这里 hideAsk()！面板显隐只由 refreshAsk(按是否有待答事项) 管。
   // 之前「s!=='waiting' 就 hideAsk」会在聚合态变 working/thinking 时把 needsinput 的面板闪掉。
   if (skin === 'mascot') updateMascotEyes(s);
+  if (skin === 'cat') updateCat(s);
 }
 
 // 按工具播放专属动作 + 头顶道具
@@ -870,7 +896,7 @@ function scheduleIdleAction() {
 }
 scheduleIdleAction();
 
-const curSkinEl = () => (skin === 'pixel' ? pixel : mascot);
+const curSkinEl = () => (skin === 'pixel' ? pixel : skin === 'cat' ? cat : mascot);
 
 // ---------- 事件 ----------
 window.pet.onEvent((ev) => {
@@ -1022,10 +1048,12 @@ window.pet.onConfig((cfg) => {
 });
 
 function applySkin(s) {
-  skin = ['pixel', 'mascot'].includes(s) ? s : 'mascot';
+  skin = ['pixel', 'mascot', 'cat'].includes(s) ? s : 'mascot';
   document.body.classList.toggle('skin-pixel', skin === 'pixel');
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
+  document.body.classList.toggle('skin-cat', skin === 'cat');
   if (skin === 'mascot') updateMascotEyes(state);
+  if (skin === 'cat') updateCat(state);
 }
 
 // ====================================================================
@@ -1124,7 +1152,7 @@ const MENU = [
 ];
 
 function toggleSkin() {
-  const order = ['mascot', 'pixel'];
+  const order = ['mascot', 'pixel', 'cat'];
   const next = order[(order.indexOf(skin) + 1) % order.length];
   applySkin(next);
   window.pet.setSkin(next);
@@ -1220,7 +1248,7 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
 // 桌宠窗口是透明矩形，空白处不该拦住后面的应用。光标在内容(小章鱼/卡片/菜单/记事本)
 // 上 → 接收点击；在透明区 → 让窗口穿透。forward:true 使穿透时 mousemove 仍回传，
 // 因此一旦光标回到内容上即可恢复可点。拖动中(g)始终保持可点。
-const HIT_SEL = '#pixel,#mascot,#radial,#notepad,#todopop,#ask,#sesslist';
+const HIT_SEL = '#pixel,#mascot,#cat,#radial,#notepad,#todopop,#ask,#sesslist';
 let mouseIgnoring = false;
 function setMouseIgnore(on) {
   if (on === mouseIgnoring) return;

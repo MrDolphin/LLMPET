@@ -14,7 +14,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 const DEFAULTS = Object.freeze({
   mode: 'pet',            // 'pet' | 'panel' | 'menubar'
-  skin: 'mascot',         // 'mascot' | 'pixel'
+  skin: 'mascot',         // 'mascot' | 'pixel' | 'cat'
   petPosition: null,      // {x,y} | null
   budget5h: 10,           // USD — kept for forward-compat; pricing is deferred
   muted: false,
@@ -27,7 +27,7 @@ function sanitize(raw) {
   const out = { ...DEFAULTS };
   if (!raw || typeof raw !== 'object') return out;
   if (['pet', 'panel', 'menubar'].includes(raw.mode)) out.mode = raw.mode;
-  if (['mascot', 'pixel'].includes(raw.skin)) out.skin = raw.skin;
+  if (['mascot', 'pixel', 'cat'].includes(raw.skin)) out.skin = raw.skin;
   if (raw.petPosition && Number.isFinite(raw.petPosition.x) && Number.isFinite(raw.petPosition.y)) {
     out.petPosition = { x: Math.round(raw.petPosition.x), y: Math.round(raw.petPosition.y) };
   }
