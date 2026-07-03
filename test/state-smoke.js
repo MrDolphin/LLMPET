@@ -180,20 +180,23 @@ async function main() {
     check('有快照时状态保持 working', () => assert(cat.classList.contains('working')));
   }
 
-  console.log('[R10] working 多姿态轮换');
+  console.log('[R10] working/thinking 多姿态轮换');
   {
     const w = world();
-    const POOL = ['cat-working.gif', 'cat-working-2.gif', 'cat-working-3.gif', 'cat-working-4.gif'];
+    const WPOOL = ['cat-working.gif', 'cat-working-2.gif', 'cat-working-3.gif', 'cat-working-4.gif'];
+    const TPOOL = ['cat-thinking.gif', 'cat-thinking-2.gif', 'cat-thinking-3.gif'];
     w.handlers.stats(baseStats({ workingCount: 1 }));
     const first = catSrc(w).split('/').pop();
-    check('working 显示轮换池素材', () => assert(POOL.includes(first)));
+    check('working 显示轮换池素材', () => assert(WPOOL.includes(first)));
     w.handlers.stats(baseStats({ idleMs: 1000 }));           // 离开 working
     w.handlers.stats(baseStats({ workingCount: 1 }));        // 再次进入
     const second = catSrc(w).split('/').pop();
     check('再次进入 working 轮换到下一张', () => {
-      assert(POOL.includes(second));
+      assert(WPOOL.includes(second));
       assert.notStrictEqual(second, first);
     });
+    w.handlers.stats(baseStats({ thinkingCount: 1 }));       // 切到 thinking
+    check('thinking 显示思考轮换池素材', () => assert(TPOOL.includes(catSrc(w).split('/').pop())));
   }
 
   console.log(`\n${failures === 0 ? '✅ RENDERER ALL PASS' : '❌ ' + failures + ' FAILURE(S)'}`);

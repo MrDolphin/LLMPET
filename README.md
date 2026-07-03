@@ -9,7 +9,7 @@
 | 表情 | 状态 | 什么时候出现 |
 |:---:|:---|:---|
 | <img src="assets/cat/cat-working.gif" width="72" alt="干活"> <img src="assets/cat/cat-working-2.gif" width="72" alt="干活2"> <img src="assets/cat/cat-working-3.gif" width="72" alt="干活3"> <img src="assets/cat/cat-working-4.gif" width="72" alt="干活4"> | 🛠️ **working 干活** | 正在调用工具 / 改文件——4 张打工姿态轮换：拍「上号」按钮 / 熬夜冠军 / 捂耳猛敲 / 边吃边敲 |
-| <img src="assets/cat/cat-thinking.gif" width="72" alt="思考"> | 🤔 **thinking 思考** | 你刚提交提问、Claude 正在想（对着笔记本挠头） |
+| <img src="assets/cat/cat-thinking.gif" width="72" alt="思考"> <img src="assets/cat/cat-thinking-2.gif" width="72" alt="思考2"> <img src="assets/cat/cat-thinking-3.gif" width="72" alt="思考3"> | 🤔 **thinking 思考** | 提交提问后 / 工具间隙的长推理——3 张思考姿态轮换：挠头 / 掏脑子 / 躺想浮云 |
 | <img src="assets/cat/cat-talking.gif" width="72" alt="回应中"> | 💬 **talking 回应中** | Claude 正在输出回复文本（对着笔记本疯狂输出喵喵喵） |
 | <img src="assets/cat/cat-juggling.gif" width="72" alt="并行子任务"> | 🤹 **juggling 并行子任务** | 召唤 subagent 多线开工（趴键盘上还同时刷手机） |
 | <img src="assets/cat/cat-sweeping.gif" width="72" alt="清理上下文"> | 🧹 **sweeping 清理** | 压缩 / 清理上下文（对手机喷消毒水） |

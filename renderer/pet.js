@@ -57,35 +57,43 @@ const CAT_STATES = {
   sorry: 'cat-waiting.gif',       // 道歉 → 冒冷汗心虚
   puzzled: 'cat-needsinput.gif',  // 疑惑 → 头顶问号
 };
-// working 是停留最久的状态 → 多张打工姿态轮换：进入时换下一张，
-// 持续干活期间每 60s 也换一张，别一直钉在同一个画面上。
-const CAT_WORKING_POOL = [
-  'cat-working.gif',   // 猛拍「上号」按钮
-  'cat-working-2.gif', // 熬夜冠军：戴耳机对着显示器
-  'cat-working-3.gif', // 捂着耳朵埋头猛敲键盘
-  'cat-working-4.gif', // 边吃零食边敲键盘
-];
-const WORKING_ROTATE_MS = 60 * 1000;
-let workingIdx = 0;
-let workingRot = null;
+// working/thinking 是停留最久的两个状态 → 多张姿态轮换：进入时换下一张，
+// 持续期间每 60s 也换一张。大上下文会话推理一次要几分钟，单张静止图
+// 播几分钟观感像卡死，轮换让「还活着」看得见。
+const CAT_POOLS = {
+  working: [
+    'cat-working.gif',   // 猛拍「上号」按钮
+    'cat-working-2.gif', // 熬夜冠军：戴耳机对着显示器
+    'cat-working-3.gif', // 捂着耳朵埋头猛敲键盘
+    'cat-working-4.gif', // 边吃零食边敲键盘
+  ],
+  thinking: [
+    'cat-thinking.gif',   // 对着笔记本挠头
+    'cat-thinking-2.gif', // 把脑子掏出来想（烧脑）
+    'cat-thinking-3.gif', // 躺着想：头顶「浮云」思考泡
+  ],
+};
+const POOL_ROTATE_MS = 60 * 1000;
+let poolIdx = 0;
+let poolRot = null;
 function updateCat(s) {
   if (!catImg) return;
-  const f = s === 'working'
-    ? CAT_WORKING_POOL[workingIdx % CAT_WORKING_POOL.length]
-    : (CAT_STATES[s] || CAT_STATES.idle);
+  const pool = CAT_POOLS[s];
+  const f = pool ? pool[poolIdx % pool.length] : (CAT_STATES[s] || CAT_STATES.idle);
   if (!catImg.getAttribute('src').endsWith(f)) catImg.src = '../assets/cat/' + f;
-  if (s === 'working') {
-    if (!workingRot) {
-      workingRot = setInterval(() => {
-        if (state !== 'working' || skin !== 'cat') return;
-        workingIdx++;
-        catImg.src = '../assets/cat/' + CAT_WORKING_POOL[workingIdx % CAT_WORKING_POOL.length];
-      }, WORKING_ROTATE_MS);
+  if (pool) {
+    if (!poolRot) {
+      poolRot = setInterval(() => {
+        const cur = CAT_POOLS[state];
+        if (!cur || skin !== 'cat') return;
+        poolIdx++;
+        catImg.src = '../assets/cat/' + cur[poolIdx % cur.length];
+      }, POOL_ROTATE_MS);
     }
-  } else if (workingRot) {
-    clearInterval(workingRot);
-    workingRot = null;
-    workingIdx++; // 下次进入 working 直接是下一张
+  } else if (poolRot) {
+    clearInterval(poolRot);
+    poolRot = null;
+    poolIdx++; // 下次进入轮换态直接是下一张
   }
 }
 const bubble = document.getElementById('bubble');
