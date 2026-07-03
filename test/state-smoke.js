@@ -184,7 +184,7 @@ async function main() {
   {
     const w = world();
     const WPOOL = ['cat-working.gif', 'cat-working-2.gif', 'cat-working-3.gif', 'cat-working-4.gif'];
-    const TPOOL = ['cat-thinking.gif', 'cat-thinking-2.gif', 'cat-thinking-3.gif'];
+    const TPOOL = ['cat-thinking.gif', 'cat-thinking-2.gif'];
     w.handlers.stats(baseStats({ workingCount: 1 }));
     const first = catSrc(w).split('/').pop();
     check('working 显示轮换池素材', () => assert(WPOOL.includes(first)));

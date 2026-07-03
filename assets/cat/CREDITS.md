@@ -18,8 +18,7 @@
 | `cat-idle.gif`       | idle       | 转椅上冰淇淋+手机摸鱼——待命 |
 | `cat-roam.gif`       | roam       | 撒腿跑着玩——闲逛 |
 | `cat-thinking.gif`   | thinking   | 对着笔记本挠头——思考（轮换第 1 张） |
-| `cat-thinking-2.gif` | thinking   | 把脑子掏出来想（烧脑）——思考轮换 |
-| `cat-thinking-3.gif` | thinking   | 躺着想：头顶「浮云」思考泡——思考轮换 |
+| `cat-thinking-2.gif` | thinking   | 躺着想：头顶「浮云」思考泡——思考轮换 |
 | `cat-talking.gif`    | talking    | 对着笔记本疯狂输出喵喵喵——正在回应 |
 | `cat-juggling.gif`   | juggling   | 趴键盘上还同时刷手机——并行子任务 |
 | `cat-sweeping.gif`   | sweeping   | 喷消毒水打扫——压缩/清理上下文 |
@@ -28,7 +27,8 @@
 | `cat-happy.gif`      | happy      | 摸小猫的头夸夸——任务完成庆祝 |
 | `cat-greet.gif`      | greet      | 被闹钟炸醒弹射到工位——打招呼/新会话 |
 | `cat-attention.gif`  | attention  | 从工位起身够手机看消息——需要注意 |
-| `cat-sleeping.gif`   | sleeping   | 被窝里睡成一坨——睡觉 |
+| `cat-sleeping.gif`   | sleeping   | 被窝里睡成一坨——睡觉（轮换第 1 张） |
+| `cat-sleeping-2.gif` | sleeping   | 坐椅子上拔下肚子毛当眼罩睡——睡觉轮换 |
 | `cat-error.gif`      | error      | 抱头崩溃大叫——出错 |
 | `cat-sad.gif`        | sad(情绪)  | 嚎啕大哭——用户消息里带负面情绪时的短暂表情 |
 

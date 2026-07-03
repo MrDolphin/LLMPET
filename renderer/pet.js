@@ -69,8 +69,11 @@ const CAT_POOLS = {
   ],
   thinking: [
     'cat-thinking.gif',   // 对着笔记本挠头
-    'cat-thinking-2.gif', // 把脑子掏出来想（烧脑）
-    'cat-thinking-3.gif', // 躺着想：头顶「浮云」思考泡
+    'cat-thinking-2.gif', // 躺着想：头顶「浮云」思考泡
+  ],
+  sleeping: [
+    'cat-sleeping.gif',   // 被窝里睡成一坨
+    'cat-sleeping-2.gif', // 坐椅子上拔下肚子毛当眼罩睡
   ],
 };
 const POOL_ROTATE_MS = 60 * 1000;
