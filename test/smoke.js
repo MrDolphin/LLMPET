@@ -303,6 +303,26 @@ async function main() {
   fs.rmSync(projDir, { recursive: true, force: true });
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
+  console.log('\n[18] 网络重试检测：API 错误间隙不再误判成思考中');
+  const netSid = 'netretry-session-rrrr';
+  const netCwd = path.join(os.tmpdir(), 'octo-net-test');
+  const netDir = path.join(os.homedir(), '.claude', 'projects', String(netCwd).replace(/[/.]/g, '-'));
+  fs.mkdirSync(netDir, { recursive: true });
+  const netFile = path.join(netDir, `${netSid}.jsonl`);
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: netSid, cwd: netCwd });
+  await sleep(30);
+  fs.writeFileSync(netFile,
+    JSON.stringify({ type: 'assistant', isApiErrorMessage: true, error: 'server_error', sessionId: netSid, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: Connection closed mid-response.' }] } }) + '\n');
+  core.cleanStaleSessions();
+  check('重试失败间隙 → error 而非 thinking', () => assert.strictEqual(core.getSession(netSid).state, 'error'));
+  check('错误类型被记录', () => assert.strictEqual(core.getSession(netSid).errorType, 'server_error'));
+  // 重试成功：错误条目之后出现正常消息 → 恢复干活
+  fs.appendFileSync(netFile,
+    JSON.stringify({ type: 'assistant', sessionId: netSid, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: '恢复了，继续。' }] } }) + '\n');
+  core.cleanStaleSessions();
+  check('重试成功后自动恢复 working', () => assert.strictEqual(core.getSession(netSid).state, 'working'));
+  fs.rmSync(netDir, { recursive: true, force: true });
+
   server.stop();
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : '❌ ' + failures + ' FAILURE(S)'} — events captured: ${events.length}, dirty fires: ${dirtyCount}`);
   process.exit(failures === 0 ? 0 : 1);

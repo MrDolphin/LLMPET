@@ -220,6 +220,7 @@ function createCore(options = {}) {
     }
 
     s.state = resolvedState;
+    s.sweepError = false; // 任何真实 hook 事件到达都接管状态，巡检错误标记作废
     s.lastEvent = { rawEvent: event || null, at: now };
     if (f.toolName) s.lastEventTool = f.toolName;
     s.recentEvents = pushRecentEvent(s, resolvedState, event, now);
@@ -365,6 +366,28 @@ function createCore(options = {}) {
           s.recentEvents = pushRecentEvent(s, 'idle', 'StopFailure', now); // 徽标 → 中断
           s.updatedAt = now;
           changed = true;
+        }
+        // 网络重试/API 报错同样发生在事件间隙：忙碌态（含 thinking）会话 tail
+        // 出现未恢复的 API 错误 → 显示 error，而不是被「长间隙=思考」误判成思考中。
+        if (BUSY_STATES.has(s.state)) {
+          const apiErr = transcript.apiErrorAfter(entries, s.id, s.lastEvent ? s.lastEvent.at : 0);
+          if (apiErr) {
+            s.state = 'error';
+            s.errorType = apiErr.errorType;
+            s.sweepError = true; // 巡检发现的错误，恢复也由巡检负责
+            s.recentEvents = pushRecentEvent(s, 'error', 'ApiError', now);
+            s.updatedAt = now;
+            changed = true;
+          }
+        } else if (s.sweepError && s.state === 'error') {
+          if (transcript.apiErrorAfter(entries, s.id, 0)) {
+            s.updatedAt = now; // 还在重试失败 → 保持 error，别被 oneshot 衰减放掉
+          } else {
+            s.state = 'working'; // 重试成功、回合继续 → 恢复干活（后续事件会再校正）
+            s.sweepError = false;
+            s.updatedAt = now;
+            changed = true;
+          }
         }
       } catch {}
     }

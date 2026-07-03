@@ -101,6 +101,27 @@ function interruptedAfter(entries, sinceTs) {
   return false;
 }
 
+// 网络重试/API 报错发生在事件间隙（不触发任何 hook），只能从 transcript 发现：
+// CC 每次失败会写 isApiErrorMessage:true 的 assistant 条目。返回「仍未恢复」
+// 的错误（其后没有正常消息），且发生在 sinceTs 之后；恢复后返回 null。
+function apiErrorAfter(entries, sid, sinceTs) {
+  if (!Array.isArray(entries)) return null;
+  let idx = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e && e.isApiErrorMessage === true && matchesSession(e, sid)) { idx = i; break; }
+  }
+  if (idx < 0) return null;
+  for (let i = idx + 1; i < entries.length; i++) {
+    const t = entries[i] && entries[i].type;
+    if (t === 'user') return null;
+    if (t === 'assistant' && entries[i].isApiErrorMessage !== true) return null;
+  }
+  const ts = Date.parse(entries[idx].timestamp || '') || 0;
+  if (ts <= (sinceTs || 0)) return null;
+  return { errorType: typeof entries[idx].error === 'string' ? entries[idx].error : 'unknown', ts };
+}
+
 // Last assistant text of the current turn (stop at the turn's user boundary).
 function lastAssistantText(entries, sid) {
   if (!Array.isArray(entries)) return null;
@@ -188,4 +209,4 @@ function promptTitle(prompt) {
   return null;
 }
 
-module.exports = { readTail, lastAssistantText, contextUsage, apiError, sessionTitle, promptTitle, clean, hasHistory, interruptedAfter };
+module.exports = { readTail, lastAssistantText, contextUsage, apiError, apiErrorAfter, sessionTitle, promptTitle, clean, hasHistory, interruptedAfter };
