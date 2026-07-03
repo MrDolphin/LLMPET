@@ -330,23 +330,34 @@ function createCore(options = {}) {
 
   // Re-read each live session's transcript so context% tracks the real client
   // (a hook only pushes context_usage on events; between turns it would freeze).
+  // 同一趟顺带检测 ESC 中断：中断不触发任何 hook 事件，只写 transcript，
+  // 之前只能靠 5 分钟 WORKING_STALE 兜底，桌宠会长时间假装还在干活。
   function refreshContextUsage() {
+    let changed = false;
+    const now = Date.now();
     for (const s of sessions.values()) {
       if (s.headless) continue;
       const p = transcriptPathFor(s);
       if (!p) continue;
       try {
         const entries = transcript.readTail(p);
-        const cu = entries && transcript.contextUsage(entries, s.id);
+        if (!entries) continue;
+        const cu = transcript.contextUsage(entries, s.id);
         if (cu) s.contextUsage = cu;
+        if (BUSY_STATES.has(s.state) && transcript.interruptedAfter(entries, s.lastEvent ? s.lastEvent.at : 0)) {
+          s.state = 'idle';
+          s.recentEvents = pushRecentEvent(s, 'idle', 'StopFailure', now); // 徽标 → 中断
+          s.updatedAt = now;
+          changed = true;
+        }
       } catch {}
     }
+    return changed;
   }
 
   function cleanStaleSessions() {
-    refreshContextUsage();
+    let changed = refreshContextUsage();
     const now = Date.now();
-    let changed = false;
     for (const [id, s] of sessions) {
       const idle = now - (s.updatedAt || now);
       const alive = s.sourcePid ? pidAlive(s.sourcePid) : null;

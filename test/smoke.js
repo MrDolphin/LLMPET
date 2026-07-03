@@ -247,6 +247,51 @@ async function main() {
     check('PreToolUse 长间隙（工具仍在跑）→ 仍是 working', () => assert.strictEqual(eTg.state, 'working'));
   }
 
+  console.log('\n[15] SessionStart 无 source 时用 transcript 历史兜底');
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-test-'));
+  const histFile = path.join(tmpDir, 'hist.jsonl');
+  fs.writeFileSync(histFile, JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '之前聊过' }] } }) + '\n'
+    + JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '好的' }] } }) + '\n');
+  check('有历史对话 + 无 source → resume（不欢迎）', () => {
+    const b = hook.buildBody('SessionStart', { session_id: 'x3', transcript_path: histFile });
+    assert.strictEqual(b.session_source, 'resume');
+  });
+  check('无 transcript + 无 source → startup（欢迎）', () => {
+    const b = hook.buildBody('SessionStart', { session_id: 'x4', transcript_path: path.join(tmpDir, 'nope.jsonl') });
+    assert.strictEqual(b.session_source, 'startup');
+  });
+  check('显式 source 优先', () => {
+    const b = hook.buildBody('SessionStart', { session_id: 'x5', source: 'compact', transcript_path: histFile });
+    assert.strictEqual(b.session_source, 'compact');
+  });
+
+  console.log('\n[16] ESC 中断检测（transcript 发现，10s 巡检放下忙碌态）');
+  const intSid = 'interrupt-session-nnnn';
+  const intCwd = path.join(os.tmpdir(), 'octo-int-test');
+  const projDir = path.join(os.homedir(), '.claude', 'projects', String(intCwd).replace(/[/.]/g, '-'));
+  fs.mkdirSync(projDir, { recursive: true });
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: intCwd });
+  await sleep(30);
+  fs.writeFileSync(path.join(projDir, `${intSid}.jsonl`),
+    JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
+  core.cleanStaleSessions();
+  check('中断后忙碌态被放下（不再等 5 分钟）', () => assert.strictEqual(core.getSession(intSid).state, 'idle'));
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eInt = st.sessions.find((x) => x.sessionId === intSid);
+    check('徽标显示中断', () => assert.strictEqual(eInt.badge, 'interrupted'));
+  }
+  // 新事件到达（用户继续）→ lastEvent 晚于中断标记 → 不再触发
+  await sleep(30);
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: intCwd });
+  core.cleanStaleSessions();
+  check('中断后继续对话不误判', () => assert.strictEqual(core.getSession(intSid).state, 'working'));
+  fs.rmSync(projDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
   server.stop();
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : '❌ ' + failures + ' FAILURE(S)'} — events captured: ${events.length}, dirty fires: ${dirtyCount}`);
   process.exit(failures === 0 ? 0 : 1);

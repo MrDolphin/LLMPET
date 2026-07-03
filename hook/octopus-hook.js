@@ -69,9 +69,6 @@ function buildBody(event, p) {
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
   if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
   if (typeof p.model === 'string' && p.model) body.model = p.model;
-  // SessionStart 带来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
-  // resume/compact 进入已有任务不该触发「新会话欢迎」。
-  if (event === 'SessionStart' && typeof p.source === 'string' && p.source) body.session_source = p.source;
   if (p.stop_hook_active === true) body.stop_hook_active = true;
   // StopFailure carries the API/server error kind (CC 2.1.x enum: server_error,
   // rate_limit, overloaded_error, billing_error, authentication_failed, …).
@@ -84,6 +81,16 @@ function buildBody(event, p) {
 
   // Transcript-derived enrichment (read the tail once).
   const entries = transcript.readTail(p.transcript_path);
+
+  // SessionStart 来源（startup/resume/clear/compact）：只有 startup 是真·新对话，
+  // resume/compact 进入已有任务不该触发「新会话欢迎」。有的环境（ccd）不带
+  // source —— 用 transcript 是否已有正式对话兜底判定。
+  if (event === 'SessionStart') {
+    body.session_source = (typeof p.source === 'string' && p.source)
+      ? p.source
+      : (transcript.hasHistory(entries) ? 'resume' : 'startup');
+  }
+
   if (entries) {
     const ctx = transcript.contextUsage(entries, p.session_id || null);
     if (ctx) body.context_usage = ctx;

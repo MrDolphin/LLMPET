@@ -72,6 +72,35 @@ function textFromContent(content) {
   return parts.join('\n\n');
 }
 
+// 是否已有正式对话内容（用户/助手消息）。SessionStart 不带 source 的环境
+// （如 ccd）用它区分「真·新对话」和 resume 进入已有任务。
+function hasHistory(entries) {
+  if (!Array.isArray(entries)) return false;
+  return entries.some((e) => e && !looksSubagent(e) && (e.type === 'user' || e.type === 'assistant'));
+}
+
+// 尾部是否是「用户手动中断」(ESC)，且发生在 sinceTs 之后。
+// ESC 中断不触发任何 hook 事件，只会往 transcript 写一条
+// `[Request interrupted by user…]` 的 user 记录——这是唯一的发现渠道。
+// 中断之后若已有新的正常消息则不算（说明已经继续对话了）。
+function interruptedAfter(entries, sinceTs) {
+  if (!Array.isArray(entries)) return false;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (!e || looksSubagent(e)) continue;
+    if (e.type !== 'user' && e.type !== 'assistant') continue;
+    if (e.type === 'user') {
+      const txt = textFromContent(e.message && e.message.content);
+      if (/\[Request interrupted by user/.test(txt || '')) {
+        const ts = Date.parse(e.timestamp || '') || 0;
+        return ts > (sinceTs || 0);
+      }
+    }
+    return false; // 最近一条是正常消息 → 没有悬着的中断
+  }
+  return false;
+}
+
 // Last assistant text of the current turn (stop at the turn's user boundary).
 function lastAssistantText(entries, sid) {
   if (!Array.isArray(entries)) return null;
@@ -159,4 +188,4 @@ function promptTitle(prompt) {
   return null;
 }
 
-module.exports = { readTail, lastAssistantText, contextUsage, apiError, sessionTitle, promptTitle, clean };
+module.exports = { readTail, lastAssistantText, contextUsage, apiError, sessionTitle, promptTitle, clean, hasHistory, interruptedAfter };
