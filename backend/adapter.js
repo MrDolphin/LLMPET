@@ -371,24 +371,29 @@ function activityToEvents(act) {
 
   switch (event) {
     case 'SessionStart': {
-      // 多重判定，全过才欢迎：
-      //  1) core 没见过这个 id（isNew）
-      //  2) source 不是 resume/compact/clear（ccd 可能不带 source，靠 hook 的
-      //     transcript 历史兜底出 startup/resume）
-      //  3) 同 cwd 没有忙碌/近期活跃的会话（fork 进入执行中任务的兜底）
-      //  4) cwd 不在隐藏目录里（~/.openloomi/sessions/<uuid> 这类一次性
-      //     工作目录是工具拉起的会话，不是人开的新对话）
-      //  5) 同项目 30 分钟内没欢迎过（频控兜底）
+      // 不在 SessionStart 上直接欢迎——那个瞬间信息最少：宿主 app 点击进入
+      // 会话时会拉起全新 claude（新 id/新 cwd/无历史/source=startup），与
+      // 真·新对话完全同构。真·新对话的确凿标志是「用户真的在里面说了话」，
+      // 所以这里只做资格预审，欢迎延迟到该会话的第一条 prompt 触发；
+      // 入口/巡检类会话永远等不到 prompt，自然静默。
       const src = session.pendingSessionSource;
-      const toolSpawned = /\/\./.test(session.cwd || '');
-      const recentlyGreeted = (Date.now() - (lastGreetAt.get(project) || 0)) < GREET_DEBOUNCE_MS;
-      if (isNew && (!src || src === 'startup') && !cwdActive && !toolSpawned && !recentlyGreeted) {
-        lastGreetAt.set(project, Date.now());
-        out.push({ kind: 'greet', project, ts: Date.now() });
-      }
+      const toolSpawned = /\/\./.test(session.cwd || ''); // ~/.xxx/sessions/<uuid> 一次性目录
+      session.greetPending = (isNew && (!src || src === 'startup') && !cwdActive && !toolSpawned)
+        ? Date.now()
+        : null;
       break;
     }
     case 'UserPromptSubmit': {
+      // 新会话资格预审通过 + 第一条 prompt 在 5 分钟内 + 同项目 30 分钟频控
+      // → 此刻才欢迎（弹射上线 2s，随后聚合态自然接管为 thinking）。
+      const pendingAt = session.greetPending || 0;
+      const recentlyGreeted = (Date.now() - (lastGreetAt.get(project) || 0)) < GREET_DEBOUNCE_MS;
+      session.greetPending = null;
+      if (pendingAt && Date.now() - pendingAt < 5 * 60 * 1000 && !recentlyGreeted) {
+        lastGreetAt.set(project, Date.now());
+        out.push({ kind: 'greet', project, ts: Date.now() });
+        break; // 欢迎已含「收到任务」之意，不再叠 user-turn（避免短暂态互抢）
+      }
       const emo = session.pendingUserEmotion || null;
       out.push({ kind: 'user-turn', project, emotion: emo, ts: Date.now() });
       break;

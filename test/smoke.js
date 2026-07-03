@@ -78,11 +78,13 @@ async function main() {
   console.log('\n[2] session lifecycle via /state');
   let r = await post('/state', { state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x' });
   check('SessionStart accepted', () => { assert.strictEqual(r.status, 200); assert.strictEqual(r.headers['x-octopus-server'], 'octopus'); });
-  check('greet event emitted', () => assert(events.some((e) => e.kind === 'greet')));
 
   r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });
-  check('user-turn event emitted', () => assert(events.some((e) => e.kind === 'user-turn')));
+  check('greet emitted on first prompt（欢迎延迟到首条输入）', () => assert(events.some((e) => e.kind === 'greet')));
   check('session is thinking', () => assert.strictEqual(core.getSession(SID).state, 'thinking'));
+
+  r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });
+  check('user-turn event emitted（第二条起）', () => assert(events.some((e) => e.kind === 'user-turn')));
 
   r = await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: SID, cwd: '/Users/me/proj-x' });
   check('operation event for Bash', () => assert(events.some((e) => e.kind === 'operation' && e.tool === 'Bash')));
@@ -218,13 +220,18 @@ async function main() {
     check('thinking 阶段不显示上一轮的「运行命令」', () => assert.strictEqual(eOp.op, null));
   }
 
-  console.log('\n[13] greet 只对真·新对话（source=startup）');
+  console.log('\n[13] greet 延迟到第一条 prompt：入口会话静默、真对话欢迎');
   const rsSid = 'resume-session-kkkk';
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: rsSid, cwd: '/Users/me/proj-resume', session_source: 'resume' });
-  check('resume 进入已有任务不欢迎', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-resume')));
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: rsSid, cwd: '/Users/me/proj-resume' });
+  check('resume 进入已有任务：说话也不欢迎', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-resume')));
   const nsSid = 'startup-session-llll';
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: nsSid, cwd: '/Users/me/proj-fresh', session_source: 'startup' });
-  check('startup 新对话正常欢迎', () => assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-fresh')));
+  check('SessionStart 本身不欢迎（等第一条 prompt）', () => assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-fresh')));
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: nsSid, cwd: '/Users/me/proj-fresh' });
+  check('新对话第一条 prompt → 欢迎', () => assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-fresh')));
+  check('欢迎时不叠 user-turn（短暂态不互抢）', () =>
+    assert(!events.some((e) => e.kind === 'user-turn' && e.project === 'proj-fresh')));
   check('hook 转发 SessionStart source', () => {
     const b = hook.buildBody('SessionStart', { session_id: 'x2', source: 'resume' });
     assert(b && b.session_source === 'resume');
@@ -269,26 +276,29 @@ async function main() {
     assert.strictEqual(b.session_source, 'compact');
   });
 
-  console.log('\n[17] 同 cwd 已有活跃会话 → 新 SessionStart 不欢迎（进入执行中任务兜底）');
+  console.log('\n[17] 同 cwd 已有活跃会话 → 说话也不欢迎（进入执行中任务兜底）');
   const busyCwd = '/Users/me/proj-busy-x';
   await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: 'busy-owner-oooo', cwd: busyCwd });
   // ccd 点进该任务：fork 新 id + 无 source + 空 transcript（最恶劣组合）
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'fork-entry-pppp', cwd: busyCwd, session_source: 'startup' });
-  check('同 cwd 忙碌中，source 即使是 startup 也不欢迎', () =>
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: 'fork-entry-pppp', cwd: busyCwd });
+  check('同 cwd 忙碌中，进入后说话也不欢迎', () =>
     assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-busy-x')));
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'fresh-proj-qqqq', cwd: '/Users/me/proj-brand-new', session_source: 'startup' });
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: 'fresh-proj-qqqq', cwd: '/Users/me/proj-brand-new' });
   check('全新项目的新对话仍正常欢迎', () =>
     assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-brand-new')));
 
   console.log('\n[19] 工具拉起的一次性目录会话 + 同项目欢迎频控');
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'toolspawn-ssss', cwd: '/Users/me/.someapp/sessions/ab12cd34', session_source: 'startup' });
-  check('隐藏目录 cwd（工具拉起）不欢迎', () =>
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: 'toolspawn-ssss', cwd: '/Users/me/.someapp/sessions/ab12cd34' });
+  check('隐藏目录 cwd（工具拉起）说话也不欢迎', () =>
     assert(!events.some((e) => e.kind === 'greet' && e.project === 'ab12cd34')));
+  // 同项目名 30 分钟频控：第一次欢迎后，另一个同名项目的新对话不再欢迎
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-a-tttt', cwd: '/Users/me/proj-debounce', session_source: 'startup' });
-  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-b-uuuu', cwd: '/Users/me/proj-debounce2', session_source: 'startup' });
-  // 同项目名 30 分钟内第二次 SessionStart（新 id、新 cwd 但 basename 相同的场景走 cwdActive；
-  // 这里直接验证同名项目频控）
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: 'debounce-a-tttt', cwd: '/Users/me/proj-debounce' });
   await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'debounce-c-vvvv', cwd: '/tmp/other/proj-debounce', session_source: 'startup' });
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: 'debounce-c-vvvv', cwd: '/tmp/other/proj-debounce' });
   check('同项目 30 分钟内只欢迎一次', () =>
     assert.strictEqual(events.filter((e) => e.kind === 'greet' && e.project === 'proj-debounce').length, 1));
 
