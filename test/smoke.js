@@ -268,6 +268,17 @@ async function main() {
     assert.strictEqual(b.session_source, 'compact');
   });
 
+  console.log('\n[17] 同 cwd 已有活跃会话 → 新 SessionStart 不欢迎（进入执行中任务兜底）');
+  const busyCwd = '/Users/me/proj-busy-x';
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: 'busy-owner-oooo', cwd: busyCwd });
+  // ccd 点进该任务：fork 新 id + 无 source + 空 transcript（最恶劣组合）
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'fork-entry-pppp', cwd: busyCwd, session_source: 'startup' });
+  check('同 cwd 忙碌中，source 即使是 startup 也不欢迎', () =>
+    assert(!events.some((e) => e.kind === 'greet' && e.project === 'proj-busy-x')));
+  await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'fresh-proj-qqqq', cwd: '/Users/me/proj-brand-new', session_source: 'startup' });
+  check('全新项目的新对话仍正常欢迎', () =>
+    assert(events.some((e) => e.kind === 'greet' && e.project === 'proj-brand-new')));
+
   console.log('\n[16] ESC 中断检测（transcript 发现，10s 巡检放下忙碌态）');
   const intSid = 'interrupt-session-nnnn';
   const intCwd = path.join(os.tmpdir(), 'octo-int-test');

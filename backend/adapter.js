@@ -355,17 +355,23 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
 // ── pet:event derivation ──────────────────────────────────────────────────────
 // Diff one activity into zero+ discrete events the frontend animates on.
 function activityToEvents(act) {
-  const { session, event, isNew, realCompletion, assistantChanged } = act;
+  const { session, event, isNew, realCompletion, assistantChanged, cwdActive } = act;
   if (!session || session.headless) return []; // background sessions: no bubbles
   const project = projectName(session);
   const out = [];
 
   switch (event) {
     case 'SessionStart': {
-      // 只有真·新对话（source=startup，或老版本 hook 没带 source）才欢迎；
-      // resume/compact 进入正在执行的任务不打招呼——之前会误报「新会话，你好！」。
+      // 三重判定，全过才欢迎：
+      //  1) core 没见过这个 id（isNew）
+      //  2) source 不是 resume/compact/clear（ccd 可能不带 source，靠 hook 的
+      //     transcript 历史兜底出 startup/resume）
+      //  3) 同 cwd 没有忙碌/近期活跃的会话（点进正在执行的任务时,ccd 可能
+      //     fork 新 id + 空 transcript + 无 source，前两条全失效，靠这条兜死）
       const src = session.pendingSessionSource;
-      if (isNew && (!src || src === 'startup')) out.push({ kind: 'greet', project, ts: Date.now() });
+      if (isNew && (!src || src === 'startup') && !cwdActive) {
+        out.push({ kind: 'greet', project, ts: Date.now() });
+      }
       break;
     }
     case 'UserPromptSubmit': {

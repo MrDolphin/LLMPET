@@ -67,6 +67,7 @@ const WORK_START_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUs
 // session keeps showing. We only retire sessions whose terminal is gone, or that
 // have been silent far too long.
 const WORKING_STALE_MS = 5 * 60 * 1000;   // stuck working/thinking → drop to idle (keep visible)
+const CWD_ACTIVE_MS = 10 * 60 * 1000;     // 同 cwd 近期活跃窗口：期间新 SessionStart 视为进入既有工作，不欢迎
 const DETACHED_REMOVE_MS = 30 * 1000;     // terminal pid dead → remove after a short grace
 const SESSION_STALE_MS = 30 * 60 * 1000;  // no live terminal + this idle → remove; ended (sleeping) → remove
 const BACKFILL_MAX_AGE_MS = SESSION_STALE_MS; // on boot, seed sessions whose transcript changed within this
@@ -203,6 +204,21 @@ function createCore(options = {}) {
     if (event === 'SessionEnd') s.ended = true;
     else if (WORK_START_EVENTS.has(event) || event === 'SessionStart') s.ended = false;
 
+    // 「同项目已有活跃会话」判定：点进正在执行的任务时，ccd 可能 fork 出全新
+    // session id、新 transcript 未落盘、也不带 source——hook 端无从分辨。
+    // 但该 cwd 必然已有忙碌/近期更新的会话，据此压掉误报的「新会话欢迎」。
+    let cwdActive = false;
+    if (event === 'SessionStart' && s.cwd) {
+      for (const [oid, o] of sessions) {
+        if (oid === id || o.headless) continue;
+        if (o.cwd === s.cwd && (BUSY_STATES.has(o.state) || now - (o.updatedAt || 0) < CWD_ACTIVE_MS)) {
+          cwdActive = true;
+          break;
+        }
+      }
+      log('core', `SessionStart ${id.slice(0, 8)} source=${f.sessionSource || '-'} isNew=${isNew} cwdActive=${cwdActive}`);
+    }
+
     s.state = resolvedState;
     s.lastEvent = { rawEvent: event || null, at: now };
     if (f.toolName) s.lastEventTool = f.toolName;
@@ -215,7 +231,7 @@ function createCore(options = {}) {
     sessions.set(id, s);
 
     try {
-      onActivity({ session: s, event: event || null, prevState, newState: resolvedState, isNew, realCompletion, assistantChanged });
+      onActivity({ session: s, event: event || null, prevState, newState: resolvedState, isNew, realCompletion, assistantChanged, cwdActive });
     } catch (err) {
       log('core', 'onActivity error:', err.message);
     }
