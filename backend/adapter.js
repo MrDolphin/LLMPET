@@ -30,6 +30,9 @@ const TOOL_LABEL = {
 function toolIcon(tool) { return TOOL_ICON[tool] || '🔧'; }
 function toolLabel(tool) { return TOOL_LABEL[tool] || tool || '处理中'; }
 
+// 「最近事件是工具活动」判定——op 标签只该跟着这些事件走
+const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop']);
+
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
   switch (type) {
@@ -72,13 +75,17 @@ function plainText(s) {
 }
 
 // core session state -> frontend state word.
+// juggling/sweeping 透传：皮肤有独立素材（cat-juggling/cat-sweeping），折叠成
+// working 会让它们永远显示不出来；无素材的皮肤由前端自行回落。
 function mapState(state) {
   switch (state) {
     case 'working':
-    case 'juggling':
     case 'carrying':
-    case 'sweeping':
       return 'working';
+    case 'juggling':
+      return 'juggling';
+    case 'sweeping':
+      return 'sweeping';
     case 'thinking':
       return 'thinking';
     case 'error':
@@ -247,9 +254,10 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
       state,
       reason,
       idleMs: e.idleMs,
-      // op 只在「正在干活/思考」时有效，避免 idle 会话仍带着上次的 op
-      // 字面量（panel 之前会渲染成「空闲 + 处理中」自相矛盾）。
-      op: (state === 'working' || state === 'thinking') && e.lastEvent && e.lastEvent.rawEvent
+      // op 只在「正在干活」且最近事件确实是工具事件时有效：idle 会话不带旧 op；
+      // thinking（刚提交 prompt）也不再显示上一轮遗留的「运行命令」等陈旧标签。
+      op: (state === 'working' || state === 'juggling' || state === 'sweeping')
+        && e.lastEvent && TOOL_EVENTS.has(e.lastEvent.rawEvent)
         ? toolLabel(e.lastEventTool || '')
         : null,
       sessionId: e.id,
@@ -267,6 +275,8 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
   const waitingCount = counted.filter((s) => s.state === 'waiting').length;
   const needsinputCount = counted.filter((s) => s.state === 'needsinput').length;
   const workingCount = counted.filter((s) => s.state === 'working').length;
+  const jugglingCount = counted.filter((s) => s.state === 'juggling').length;
+  const sweepingCount = counted.filter((s) => s.state === 'sweeping').length;
   const thinkingCount = counted.filter((s) => s.state === 'thinking').length;
   const errorCount = counted.filter((s) => s.state === 'error').length;
 
@@ -313,6 +323,8 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     waitingCount,
     needsinputCount,
     workingCount,
+    jugglingCount,
+    sweepingCount,
     thinkingCount,
     errorCount,
     todos: [],

@@ -25,5 +25,6 @@
 | `cat-attention.gif`  | attention  | 从工位起身够手机看消息——需要注意 |
 | `cat-sleeping.gif`   | sleeping   | 被窝里睡成一坨——睡觉 |
 | `cat-error.gif`      | error      | 抱头崩溃大叫——出错 |
+| `cat-sad.gif`        | sad(情绪)  | 嚎啕大哭——用户消息里带负面情绪时的短暂表情 |
 
 > 版权归原作者所有，此处仅作个人桌宠皮肤使用；如需商用请联系原作者授权，并请支持原作者。

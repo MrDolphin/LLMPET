@@ -65,7 +65,9 @@
 ### 生命周期
 - **持续态**:working / thinking / juggling / idle / roam / sleeping —— 待在该状态直到下个事件。
 - **一次性态 (oneshot,触发后衰减)**:attention / error / sweeping / notification / carrying。
-- **序列态(入睡)**:`yawning → dozing → collapsing → sleeping`,醒来 `waking`。
+  衰减兜底已实现(core.js `ONESHOT_TTL_MS`):attention/carrying 15s、sweeping 20s、error 45s 内无后续事件自动落回 idle;notification 例外(语义是「等你回复」,须等用户行动)。
+- **序列态(入睡)**:`yawning → dozing → collapsing → sleeping`,醒来 `waking`。(词汇保留,当前无生产者)
+- **会话回收**:SessionEnd(含 /clear → sweeping)会标记 `ended`,30 分钟后回收——终端 pid 存活也不豁免,避免 /clear 留下幽灵会话。
 
 ---
 
@@ -153,9 +155,10 @@
 
 ## 6. 前端接入现状(给生成完之后接图用)
 
-- **现在已渲染**:`idle / working / thinking / waiting / needsinput / happy / greet / sleeping / error`
-- **状态机里有、但前端还没接独立形象**(目前并到了 working / idle / sleeping):`juggling / carrying / sweeping / roam / yawning / dozing / collapsing / waking`
-- 图生成好后:把 PNG 放 `assets/octo/`,前端把 SVG 形象换成 `<img>` 贴图按 state 切换,并把上面这些"还没接"的状态在 `pet.js` 状态机里启用(adapter 已经能区分 juggling/carrying/sweeping,roam/入睡序列需要补 idle 计时驱动)。
+- **现在已渲染**:`idle / working / juggling / sweeping / thinking / waiting / needsinput / happy / greet / talking / sleeping / error` + 情绪短暂态 `loved / sad / sorry / excited / puzzled`(月薪喵皮肤有独立素材;章鱼/像素回落到就近表情)。
+- **状态机里有、但前端还没接独立形象**:`carrying / attention / roam / yawning / dozing / collapsing / waking`(attention 被 Stop 完成门改写为 idle+徽标;roam/入睡序列暂无生产者)。
+- 前端聚合梯子与本文件第 3 节优先级表一致:`waiting > 短暂态 > error > needsinput > sweeping > juggling > working > thinking > idle > sleeping`(见 `renderer/pet.js` applyStats)。
+- 状态机回归测试:`npm test`(`test/smoke.js` 后端链路 + `test/state-smoke.js` 渲染端,后者用 `test/dom-stub.js` 把真实 `pet.js` 跑在 Node 里)。
 
 ---
 

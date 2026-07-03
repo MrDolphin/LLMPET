@@ -45,6 +45,16 @@ const STATE_PRIORITY = Object.freeze({
 const ONESHOT_STATES = new Set(['attention', 'error', 'sweeping', 'notification', 'carrying']);
 const SLEEP_SEQUENCE = new Set(['yawning', 'dozing', 'collapsing', 'sleeping', 'waking']);
 
+// 一次性态的衰减兜底（STATES.md：oneshot 触发后衰减）。之前只有声明没有实现：
+// StopFailure 后会话卡在 error、/clear 后卡在 sweeping，一直霸占最高优先级。
+// notification 例外——它语义是「等你回复」，要等用户行动，不自动衰减。
+const ONESHOT_TTL_MS = Object.freeze({
+  attention: 15 * 1000,
+  carrying: 15 * 1000,
+  sweeping: 20 * 1000,
+  error: 45 * 1000,
+});
+
 // States the /state route accepts.
 const VALID_STATES = new Set([...Object.keys(STATE_PRIORITY), ...SLEEP_SEQUENCE]);
 
@@ -95,8 +105,10 @@ function deriveBadge(s) {
   if (ev === 'StopFailure' || ev === 'PostToolUseFailure' || ev === 'ApiError') return 'interrupted';
   if (s.state !== 'idle' && s.state !== 'sleeping') return 'running';
   if (s.state === 'sleeping') return 'idle';
+  // 只认 requiresCompletionAck（真完成才置位）。之前 DONE_EVENTS.has(ev) 兜底会
+  // 击穿 Stop 完成门：被抑制的 Stop（后台任务在跑 / stop-hook 续跑）也显示 done，
+  // 且 ackCompletion 清了标志徽标仍在。
   if (s.requiresCompletionAck === true) return 'done';
-  if (DONE_EVENTS.has(ev)) return 'done';
   return 'idle';
 }
 
@@ -184,6 +196,11 @@ function createCore(options = {}) {
 
     // preserve_state: some hooks ask us to keep the prior steady state.
     if (f.preserveState === true && prev) resolvedState = prevState;
+
+    // SessionEnd（含 /clear → sweeping）标记会话已结束：之后无论落在什么状态，
+    // 陈旧清理都会按「已结束」回收，不再因终端 pid 还活着而永久留在列表里。
+    if (event === 'SessionEnd') s.ended = true;
+    else if (WORK_START_EVENTS.has(event) || event === 'SessionStart') s.ended = false;
 
     s.state = resolvedState;
     s.lastEvent = { rawEvent: event || null, at: now };
@@ -333,10 +350,15 @@ function createCore(options = {}) {
       const idle = now - (s.updatedAt || now);
       const alive = s.sourcePid ? pidAlive(s.sourcePid) : null;
 
-      // Ended session (SessionEnd → sleeping): retire after a while.
-      if (s.state === 'sleeping') {
+      // Oneshot decay backstop: error/attention/sweeping/carrying settle to idle
+      // after their TTL if no further event arrives (StopFailure / /clear paths).
+      const ttl = ONESHOT_TTL_MS[s.state];
+      if (ttl && idle > ttl) { s.state = 'idle'; changed = true; }
+
+      // Ended session (SessionEnd → sleeping / clear → sweeping): retire after a while.
+      if (s.state === 'sleeping' || s.ended) {
         if (idle > SESSION_STALE_MS) { sessions.delete(id); changed = true; }
-        continue;
+        if (s.state === 'sleeping') continue;
       }
       // Terminal process is gone → remove after a short grace.
       if (alive === false && idle > DETACHED_REMOVE_MS) {

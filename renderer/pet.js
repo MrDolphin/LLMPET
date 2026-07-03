@@ -9,14 +9,23 @@ const cat = document.getElementById('cat');
 // 图标款按状态换眼神（每种状态一张只改眼睛的图）
 const MASCOT_EYES = {
   working: 'mascot-work.png', // 干活：对着笔记本敲代码 + 咖啡（整幅工作场景）
+  juggling: 'mascot-work.png', // 并行子任务：无独立图，回落到干活
+  sweeping: 'mascot-work.png', // 清理上下文：无独立图，回落到干活
   idle: 'mascot-sleep.png',   // 无任务：闭眼
   sleeping: 'mascot-sleep.png',
   thinking: 'mascot-think.png', // 思考：往上看
   happy: 'mascot-happy.png',  // 完成：^^ 笑眼
   greet: 'mascot-happy.png',
+  talking: 'mascot-happy.png',
   waiting: 'mascot-wait.png', // 等你处理：瞪大
   needsinput: 'mascot-think.png', // 等你回复：往上看(期待)
   error: 'mascot-wait.png',
+  // 情绪短暂态 → 就近回落（专属图未画）
+  loved: 'mascot-happy.png',
+  excited: 'mascot-happy.png',
+  sad: 'mascot-wait.png',
+  sorry: 'mascot-wait.png',
+  puzzled: 'mascot-think.png',
 };
 function updateMascotEyes(s) {
   if (!mascotImg) return;
@@ -41,6 +50,12 @@ const CAT_STATES = {
   attention: 'cat-attention.gif', // 从工位起身够手机看消息：需要注意
   sleeping: 'cat-sleeping.gif',   // 被窝里睡成一坨：睡觉
   error: 'cat-error.gif',         // 抱头崩溃大叫：出错
+  // 情绪短暂态 → 就近映射，别回落到摸鱼 idle 图（表情和文案会打架）
+  loved: 'cat-happy.gif',         // 被夸 → 摸头开心
+  excited: 'cat-happy.gif',
+  sad: 'cat-sad.gif',             // 惹你生气了 → 嚎啕大哭
+  sorry: 'cat-waiting.gif',       // 道歉 → 冒冷汗心虚
+  puzzled: 'cat-needsinput.gif',  // 疑惑 → 头顶问号
 };
 function updateCat(s) {
   if (!catImg) return;
@@ -564,10 +579,11 @@ const CLAUDE_ICON =
   '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
 const SESS_META = {
   waiting: '✋ 等你授权', needsinput: '💬 等你回复',
-  working: '⚙️ 干活中', thinking: '💭 思考中', error: '😵 出错了',
+  working: '⚙️ 干活中', juggling: '🤹 并行子任务', sweeping: '🧹 清理上下文',
+  thinking: '💭 思考中', error: '😵 出错了',
   idle: '空闲', sleeping: '💤 休息中',
 };
-const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, thinking: 2, idle: 4, sleeping: 5 };
+const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2, sweeping: 2, thinking: 2, idle: 4, sleeping: 5 };
 
 // 对齐参考项目阈值：≥90% 红(hot)、≥75% 黄(warm)、其余灰
 function ctxClass(p) { return p >= 90 ? 'high' : p >= 75 ? 'mid' : ''; }
@@ -610,7 +626,7 @@ function renderSessList() {
     // meta：等待类显示「等你…」；忙碌显示当前操作；其余只显示状态（不要把陈旧 op 显示成"处理中"）
     let meta;
     if (attn) meta = s.reason ? (s.state === 'waiting' ? '✋ 等你' + s.reason : '💬 等你' + s.reason) : SESS_META[s.state];
-    else if (s.state === 'working' || s.state === 'thinking') meta = s.op || SESS_META[s.state];
+    else if (s.state === 'working' || s.state === 'juggling' || s.state === 'sweeping' || s.state === 'thinking') meta = s.op || SESS_META[s.state];
     else if (s.badge === 'done') meta = '✅ 刚完成';
     else if (s.badge === 'interrupted') meta = '⚠️ 中断';
     else meta = SESS_META[s.state] || s.state;
@@ -717,10 +733,17 @@ function buildPixel() {
 buildPixel();
 
 // ---------- 状态机（作用于两种形象，仅当前皮肤可见） ----------
+// 前端会 setState 的全部状态词（聚合态 + 短暂态 + 情绪态）。
+// classList.remove 必须覆盖此全集，漏一个就会 class 残留在皮肤元素上。
+const STATE_WORDS = [
+  'idle', 'working', 'juggling', 'sweeping', 'happy', 'sleeping', 'waiting',
+  'thinking', 'needsinput', 'error', 'greet', 'talking', 'attention', 'roam',
+  'loved', 'sad', 'sorry', 'excited', 'puzzled',
+];
 function setState(s) {
   if (state === s) return;
   for (const el of stateEls) {
-    el.classList.remove('idle', 'working', 'happy', 'sleeping', 'waiting', 'thinking', 'needsinput', 'error', 'greet', 'talking', 'loved', 'sad', 'sorry', 'excited', 'puzzled');
+    el.classList.remove(...STATE_WORDS);
     el.classList.add(s);
   }
   state = s;
@@ -771,13 +794,24 @@ function clearAction() {
   if (state === 'working') for (const el of stateEls) el.classList.add('act-work');
 }
 
-// 短暂状态：happy/error/greet，到点后由 applyStats 接管
+// 短暂状态：happy/error/greet…，到点后由 applyStats 接管。
+// 到期不再干等下一个快照（周期推送最坏 ~4s，短暂态会拖尾）——
+// 定时用最近一次快照主动重算聚合态，到点即回落。
+let transientTimer = null;
 function transient(s, ms, text, holdMs) {
   if (state === 'waiting') return; // 等用户优先
   transientState = s;
   transientUntil = perfNow() + ms;
   setState(s);
+  clearTimeout(transientTimer);
+  transientTimer = setTimeout(() => { if (lastStats) applyStats(lastStats); }, ms + 30);
   if (text) showBubble(text, holdMs || ms);
+}
+// 高优先级稳态（waiting/needsinput/error）接管时清掉残留短暂态，
+// 否则 talking/thinking 会在下个快照借 transientUntil 复活盖回来。
+function clearTransient() {
+  transientUntil = 0;
+  clearTimeout(transientTimer);
 }
 
 // ---------- 声音提示（Web Audio 合成，无需音频文件） ----------
@@ -860,18 +894,11 @@ function hideBubble() {
 
 function scheduleBlink() {
   blinkTimer = setTimeout(() => {
-    if (state !== 'sleeping' && state !== 'waiting') {
-      if (skin === 'mascot') {
-        // 图标款是图片：睁眼状态下眨一下（短暂换成闭眼图）
-        if (state === 'working') {
-          mascotImg.src = '../assets/mascot-sleep.png';
-          setTimeout(() => updateMascotEyes(state), 150);
-        }
-      } else {
-        const el = curSkinEl();
-        el.classList.add('blink');
-        setTimeout(() => el.classList.remove('blink'), 160);
-      }
+    // 仅像素怪兽保留 class 眨眼位（cat 是 GIF 自带动效；mascot 之前的
+    // 「眨眼」是把整幅工作场景换成闭眼底图 150ms，观感是画面闪断，已移除）。
+    if (skin === 'pixel' && state !== 'sleeping' && state !== 'waiting') {
+      pixel.classList.add('blink');
+      setTimeout(() => pixel.classList.remove('blink'), 160);
     }
     scheduleBlink();
   }, 2500 + Math.random() * 4000);
@@ -882,13 +909,11 @@ scheduleBlink();
 function scheduleIdleAction() {
   setTimeout(() => {
     if (state === 'idle' && !radialOpen && !muted) {
+      // 只有像素怪兽有 peek 动画；mascot 的 glance CSS 指向已不存在的
+      // #teyes（img 皮肤没有 SVG 眼睛节点），cat 由 GIF 自带动效。
       if (skin === 'pixel') {
         pixel.classList.add('peek');
         setTimeout(() => pixel.classList.remove('peek'), 620);
-      } else {
-        const el = curSkinEl(); // 图标款章鱼：眼睛扫视
-        el.classList.add('glance');
-        setTimeout(() => el.classList.remove('glance'), 1600);
       }
     }
     scheduleIdleAction();
@@ -906,23 +931,33 @@ window.pet.onEvent((ev) => {
     return;
   }
   switch (ev.kind) {
-    case 'operation':
-      if (state !== 'waiting') {
-        // transient（thinking/happy/talking…）存续期间不被工具事件立刻盖掉，
-        // 到期后由 applyStats 聚合接管（STATES.md：短暂态优先级高于聚合）
-        if (perfNow() >= transientUntil) setState('working');
+    case 'operation': {
+      // 高优先级稳态（等授权/等回复/出错/清理）不被工具事件降级成 working——
+      // 之前 error 期间其它会话干活会导致 working↔error 持续闪烁。
+      const hold = state === 'waiting' || state === 'needsinput' || state === 'error' || state === 'sweeping';
+      // transient（thinking/happy/talking…）存续期间也不盖（STATES.md：短暂态高于聚合）
+      if (!hold && perfNow() >= transientUntil) {
+        setState('working');
         playAction(ev.tool, ev.icon);
       }
       showBubble(`${ev.icon || '🔧'} ${ev.detail}`);
       break;
+    }
     case 'say':
       if (ev.text && ev.text.length > 2 && state !== 'waiting') {
-        // Claude 的话里带情绪（sorry/puzzled/excited）→ 先短暂表情 2.8s，
-        // 再回到 talking 把话说完；没有情绪就直接进 talking。
-        if (ev.emotion) {
+        const dur = Math.min(6000, Math.max(2200, ev.text.length * 80));
+        // Stop 会同批派生 turn-done(happy) + say(talking)：让庆祝先演完，
+        // talking 排在 happy 结束后接棒，气泡文本立刻显示不用等。
+        if (transientState === 'happy' && perfNow() < transientUntil) {
+          showBubble(`💬 ${ev.text}`, Math.min(4200, dur));
+          const token = ++sayToken;
+          setTimeout(() => {
+            if (token === sayToken && state !== 'waiting') transient(ev.emotion || 'talking', dur);
+          }, Math.max(0, transientUntil - perfNow()));
+        } else if (ev.emotion) {
+          // Claude 的话里带情绪（sorry/puzzled/excited）→ 短暂表情替代 talking
           transient(ev.emotion, 2800, `💬 ${ev.text}`, Math.min(4200, ev.text.length * 80));
         } else {
-          const dur = Math.min(6000, Math.max(2200, ev.text.length * 80));
           transient('talking', dur, `💬 ${ev.text}`, Math.min(4200, dur));
         }
       }
@@ -953,6 +988,7 @@ window.pet.onEvent((ev) => {
       SOUND.error();
       break;
     case 'waiting':
+      clearTransient(); // 残留的 talking/thinking 短暂态不得盖过等授权
       setState('waiting');
       SOUND.waiting();
       if (ev.choice && ((ev.choice.options && ev.choice.options.length) || ev.choice.allowInput)) {
@@ -963,7 +999,7 @@ window.pet.onEvent((ev) => {
       break;
     case 'needsinput':
       // Claude 在末尾问「要不要继续」之类，等你回复 → 黄点 + 可在桌宠上继续/回复
-      if (state !== 'waiting') setState('needsinput');
+      if (state !== 'waiting') { clearTransient(); setState('needsinput'); }
       SOUND.done();
       if (ev.choice && ((ev.choice.options && ev.choice.options.length) || ev.choice.allowInput)) {
         enqueueChoice(ev.choice);
@@ -986,8 +1022,11 @@ function perfNow() {
 }
 
 // ---------- 统计 + 聚合状态 ----------
+let lastStats = null; // 最近一次快照：transient 到期时用它立即重算聚合态
+let sayToken = 0;     // say 接棒 happy 的排队令牌（新事件作废旧排队）
 function applyStats(s) {
   if (!s) return;
+  lastStats = s;
   chipCost.textContent = '$' + (s.today.cost || 0).toFixed(3);
   chipWindow.textContent = '5h $' + (s.window5h.cost || 0).toFixed(3);
   lastWaiting = (s.waitingCount || 0) + (s.needsinputCount || 0); // 待处理徽标含「等你回复」
@@ -1005,20 +1044,29 @@ function applyStats(s) {
   // 你正在看面板/打字 → 不再改小章鱼状态(别动来动去打断你)，安静等你答完
   if (isInteracting()) return;
 
-  // 聚合：等你处理 > 短暂态(庆祝/出错) > 出错瘫倒 > 干活 > 思考 > 等你回复 > 空闲/睡觉
+  // 聚合梯子，对齐 STATES.md 的优先级表：
+  //   waiting > 短暂态 > error(8) > needsinput/notification(7) > sweeping(6)
+  //   > juggling(4) > working(3) > thinking(2) > idle(1) > sleeping(0)
+  // 之前 working 排在 needsinput 前面，多会话时「等你回复」被干活态彻底盖住。
   if (s.waitingCount > 0) {
     setState('waiting');
   } else if (perfNow() < transientUntil) {
     setState(transientState);
   } else if (s.errorCount > 0) {
-    setState('error'); // 有会话卡在 API 错误 → 瘫倒，直到该会话恢复
+    setState('error'); // 有会话卡在 API 错误 → 瘫倒，直到该会话恢复或 oneshot 衰减
+  } else if (s.needsinputCount > 0) {
+    setState('needsinput');
+  } else if (s.sweepingCount > 0) {
+    setState('sweeping');
+  } else if (s.jugglingCount > 0) {
+    setState('juggling');
   } else if (s.workingCount > 0) {
     setState('working');
   } else if (s.thinkingCount > 0) {
     setState('thinking');
-  } else if (s.needsinputCount > 0) {
-    setState('needsinput');
-  } else if (s.idleMs != null && s.idleMs > IDLE_SLEEP_MS) {
+  } else if (s.idleMs == null || s.idleMs > IDLE_SLEEP_MS) {
+    // idleMs=null 表示已无任何活跃会话——什么都没发生就该睡觉；
+    // 之前 null 落到 idle，桌宠永不入睡，睡着后会话被回收还会凭空惊醒。
     setState('sleeping');
   } else {
     setState('idle');
@@ -1242,8 +1290,11 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
     applySkin(cfg.skin || 'mascot');
   }
   const s = await window.pet.getStats();
+  // 有快照就按真实聚合态亮相；之前无条件 setState('idle') 会把刚算出的
+  // working/waiting 盖掉，启动瞬间总是先闪一下空闲。getStats 落空但推送
+  // 已先到时（lastStats 已有值）同样不能清。
   if (s) applyStats(s);
-  setState('idle');
+  else if (!lastStats) setState('idle');
   showBubble('🐙 小章鱼上线，开始盯任务啦！', 3000);
   if (DEBUG_CONFETTI) setInterval(() => confetti(), 2500);
 })();

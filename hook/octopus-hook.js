@@ -61,7 +61,10 @@ function buildBody(event, p) {
   // Manual /compact ends a turn (settle to idle); auto-compact keeps working.
   if (event === 'PostCompact' && p.trigger === 'manual') state = 'idle';
 
-  const sid = p.session_id || 'default';
+  // 没有 session_id 的事件（stdin 300ms 超时读到空 payload 等）直接丢弃：
+  // 以 'default' 入库会伪造一个名为「efault」的幽灵会话并跨会话串状态。
+  if (typeof p.session_id !== 'string' || !p.session_id) return null;
+  const sid = p.session_id;
   const body = { state, event, session_id: sid };
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
   if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;

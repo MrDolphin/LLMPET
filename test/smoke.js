@@ -154,6 +154,70 @@ async function main() {
   const sweepResp = await sweepP;
   check('swept perm got deny', () => assert.strictEqual(JSON.parse(sweepResp.body).hookSpecificOutput.decision.behavior, 'deny'));
 
+  console.log('\n[8] juggling/sweeping 透传（皮肤素材可达）+ 计数');
+  const jSid = 'juggle-session-eeee';
+  await post('/state', { state: 'juggling', event: 'SubagentStart', session_id: jSid, cwd: '/Users/me/proj-j' });
+  const sSid = 'sweep-session-ffff';
+  await post('/state', { state: 'sweeping', event: 'PreCompact', session_id: sSid, cwd: '/Users/me/proj-s' });
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const js = st.sessions.find((x) => x.sessionId === jSid);
+    const ss = st.sessions.find((x) => x.sessionId === sSid);
+    check('juggling 不再折叠成 working', () => assert.strictEqual(js.state, 'juggling'));
+    check('sweeping 不再折叠成 working', () => assert.strictEqual(ss.state, 'sweeping'));
+    check('jugglingCount/sweepingCount 计数', () => {
+      assert(st.jugglingCount >= 1 && st.sweepingCount >= 1);
+    });
+  }
+
+  console.log('\n[9] Stop 完成门：被抑制的 Stop 不显示 done 徽标');
+  const supSid = 'suppressed-stop-gggg';
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: supSid, cwd: '/Users/me/proj-sup' });
+  await post('/state', { state: 'attention', event: 'Stop', session_id: supSid, cwd: '/Users/me/proj-sup', background_tasks_count: 2 });
+  {
+    const s9 = core.getSession(supSid);
+    check('抑制的 Stop 不置 requiresCompletionAck', () => assert.strictEqual(!!s9.requiresCompletionAck, false));
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const e9 = st.sessions.find((x) => x.sessionId === supSid);
+    check('徽标为 idle 而非 done（deriveBadge 不再被 Stop 事件击穿）', () => assert.strictEqual(e9.badge, 'idle'));
+    check('无 turn-done 庆祝事件', () => assert(!events.some((e) => e.kind === 'turn-done' && e.project === 'proj-sup')));
+  }
+
+  console.log('\n[10] oneshot 衰减：error/sweeping 不再永久卡死');
+  const errSid = 'stuck-error-hhhh';
+  await post('/state', { state: 'error', event: 'StopFailure', session_id: errSid, cwd: '/Users/me/proj-err' });
+  check('StopFailure 后会话进入 error', () => assert.strictEqual(core.getSession(errSid).state, 'error'));
+  core.sessions.get(errSid).updatedAt = Date.now() - 46 * 1000; // 越过 45s TTL
+  core.cleanStaleSessions();
+  check('error 45s 后衰减为 idle（不再钉死全局瘫倒）', () => assert.strictEqual(core.getSession(errSid).state, 'idle'));
+
+  console.log('\n[11] /clear 幽灵会话：sweeping 衰减 + ended 回收');
+  const clrSid = 'cleared-session-iiii';
+  await post('/state', { state: 'sweeping', event: 'SessionEnd', session_id: clrSid, cwd: '/Users/me/proj-clr' });
+  check('SessionEnd(clear) 标记 ended', () => assert.strictEqual(core.getSession(clrSid).ended, true));
+  core.sessions.get(clrSid).updatedAt = Date.now() - 21 * 1000; // 越过 sweeping 20s TTL
+  core.cleanStaleSessions();
+  check('清理表情 20s 后衰减为 idle', () => assert.strictEqual(core.getSession(clrSid).state, 'idle'));
+  core.sessions.get(clrSid).updatedAt = Date.now() - 31 * 60 * 1000; // 越过 30min
+  core.cleanStaleSessions();
+  check('ended 会话 30min 后被回收（终端 pid 存活也不豁免）', () => assert.strictEqual(core.getSession(clrSid), null));
+
+  console.log('\n[12] hook 契约：无 session_id 丢弃 + op 标签不陈旧');
+  const hook = require('../hook/octopus-hook');
+  check('空 payload（stdin 超时）不再伪造 default 会话', () => assert.strictEqual(hook.buildBody('UserPromptSubmit', {}), null));
+  check('正常 payload 正确出状态', () => {
+    const b = hook.buildBody('UserPromptSubmit', { session_id: 'x1', prompt: 'hi' });
+    assert(b && b.state === 'thinking' && b.session_id === 'x1');
+  });
+  const opSid = 'op-label-jjjj';
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: opSid, cwd: '/Users/me/proj-op' });
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: opSid, cwd: '/Users/me/proj-op' });
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eOp = st.sessions.find((x) => x.sessionId === opSid);
+    check('thinking 阶段不显示上一轮的「运行命令」', () => assert.strictEqual(eOp.op, null));
+  }
+
   server.stop();
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : '❌ ' + failures + ' FAILURE(S)'} — events captured: ${events.length}, dirty fires: ${dirtyCount}`);
   process.exit(failures === 0 ? 0 : 1);

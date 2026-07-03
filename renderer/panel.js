@@ -104,6 +104,8 @@ function render(s) {
 
 const STATE_META = {
   working: { label: '干活中', cls: 'st-working' },
+  juggling: { label: '并行子任务', cls: 'st-working' },
+  sweeping: { label: '清理上下文', cls: 'st-working' },
   thinking: { label: '思考中', cls: 'st-thinking' },
   waiting: { label: '等你处理', cls: 'st-waiting' },
   needsinput: { label: '等你回复', cls: 'st-needsinput' },
@@ -187,7 +189,7 @@ function renderSessList(sessions) {
       const detail =
         effState === 'waiting' ? `等你${s.reason || '处理'}`
         : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || '等你回复')
-        : (effState === 'working' || effState === 'thinking') && s.op ? escapeHtml(s.op)
+        : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
         : escapeHtml(m.label);
       return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
     })
