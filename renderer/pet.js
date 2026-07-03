@@ -38,7 +38,7 @@ const catImg = document.getElementById('cat-img');
 const CAT_STATES = {
   idle: 'cat-idle.gif',           // 转椅上冰淇淋+手机摸鱼：待命
   roam: 'cat-roam.gif',           // 撒腿跑着玩：闲逛
-  working: 'cat-working.gif',     // 戴耳机敲代码「熬夜冠军」：干活
+  working: 'cat-working.gif',     // 戴耳机猛拍「上号」按钮：干活
   thinking: 'cat-thinking.gif',   // 对着笔记本挠头：思考
   talking: 'cat-talking.gif',     // 对着笔记本疯狂输出喵喵喵：回应中
   juggling: 'cat-juggling.gif',   // 趴键盘上还同时刷手机：并行子任务
@@ -46,7 +46,7 @@ const CAT_STATES = {
   waiting: 'cat-waiting.gif',     // 冒汗紧张等待：等你授权
   needsinput: 'cat-needsinput.gif', // 头顶冒问号挠头：等你回复
   happy: 'cat-happy.gif',         // 摸小猫的头夸夸：完成庆祝
-  greet: 'cat-greet.gif',         // 猛拍「上号」：打招呼
+  greet: 'cat-greet.gif',         // 被闹钟炸醒弹射到工位：新会话火速上线
   attention: 'cat-attention.gif', // 从工位起身够手机看消息：需要注意
   sleeping: 'cat-sleeping.gif',   // 被窝里睡成一坨：睡觉
   error: 'cat-error.gif',         // 抱头崩溃大叫：出错

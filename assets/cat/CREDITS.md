@@ -11,7 +11,7 @@
 
 | 文件 | 状态 | 表情含义 |
 |---|---|---|
-| `cat-working.gif`    | working    | 戴耳机敲代码「熬夜冠军」——专注干活 |
+| `cat-working.gif`    | working    | 戴耳机猛拍「上号」按钮——干活中 |
 | `cat-idle.gif`       | idle       | 转椅上冰淇淋+手机摸鱼——待命 |
 | `cat-roam.gif`       | roam       | 撒腿跑着玩——闲逛 |
 | `cat-thinking.gif`   | thinking   | 对着笔记本挠头——思考 |
@@ -21,7 +21,7 @@
 | `cat-waiting.gif`    | waiting    | 冒汗紧张等待——等你授权 |
 | `cat-needsinput.gif` | needsinput | 头顶冒问号挠头——等你回复 |
 | `cat-happy.gif`      | happy      | 摸小猫的头夸夸——任务完成庆祝 |
-| `cat-greet.gif`      | greet      | 猛拍「上号」——打招呼/新会话 |
+| `cat-greet.gif`      | greet      | 被闹钟炸醒弹射到工位——打招呼/新会话 |
 | `cat-attention.gif`  | attention  | 从工位起身够手机看消息——需要注意 |
 | `cat-sleeping.gif`   | sleeping   | 被窝里睡成一坨——睡觉 |
 | `cat-error.gif`      | error      | 抱头崩溃大叫——出错 |
