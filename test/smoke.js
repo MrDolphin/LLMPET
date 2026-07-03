@@ -230,14 +230,15 @@ async function main() {
     assert(b && b.session_source === 'resume');
   });
 
-  console.log('\n[14] Thinking some more：工具结束后长间隙 = 推理中');
-  const tgSid = 'thinkgap-session-mmmm';
+  console.log('\n[14] 工具结束后长间隙 = 摸鱼（loafing），不硬说思考');
+  const tgSid = 'loafgap-session-mmmm';
   await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: tgSid, cwd: '/Users/me/proj-tg' });
   core.sessions.get(tgSid).updatedAt = Date.now() - 6000; // 工具结束 6s 无事件
   {
     const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
     const eTg = st.sessions.find((x) => x.sessionId === tgSid);
-    check('PostToolUse 后 >5s 无事件 → thinking', () => assert.strictEqual(eTg.state, 'thinking'));
+    check('PostToolUse 后 >5s 无事件 → loafing 摸鱼', () => assert.strictEqual(eTg.state, 'loafing'));
+    check('loafingCount 计数', () => assert(st.loafingCount >= 1));
   }
   await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: tgSid, cwd: '/Users/me/proj-tg' });
   core.sessions.get(tgSid).updatedAt = Date.now() - 6000; // 工具还在跑 6s

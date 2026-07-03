@@ -107,6 +107,7 @@ const STATE_META = {
   juggling: { label: '并行子任务', cls: 'st-working' },
   sweeping: { label: '清理上下文', cls: 'st-working' },
   thinking: { label: '思考中', cls: 'st-thinking' },
+  loafing: { label: '摸鱼中', cls: 'st-idle' },
   waiting: { label: '等你处理', cls: 'st-waiting' },
   needsinput: { label: '等你回复', cls: 'st-needsinput' },
   error: { label: '出错了', cls: 'st-error' },

@@ -25,7 +25,7 @@ function baseStats(over = {}) {
   return {
     today: { cost: 0 }, window5h: { cost: 0 }, sessions: [], bg: { zombie: 0 },
     waitingCount: 0, needsinputCount: 0, workingCount: 0, jugglingCount: 0,
-    sweepingCount: 0, thinkingCount: 0, errorCount: 0, idleMs: 1000,
+    sweepingCount: 0, thinkingCount: 0, loafingCount: 0, errorCount: 0, idleMs: 1000,
     ...over,
   };
 }
@@ -197,6 +197,14 @@ async function main() {
     });
     w.handlers.stats(baseStats({ thinkingCount: 1 }));       // 切到 thinking
     check('thinking 显示思考轮换池素材', () => assert(TPOOL.includes(catSrc(w).split('/').pop())));
+    // loafing 摸鱼：工具间隙，优先级低于 thinking、高于 idle
+    const LPOOL = ['cat-loafing.gif', 'cat-loafing-2.gif', 'cat-loafing-3.gif'];
+    w.handlers.stats(baseStats({ loafingCount: 1 }));
+    check('loafing 显示摸鱼轮换池素材', () => assert(LPOOL.includes(catSrc(w).split('/').pop())));
+    w.handlers.stats(baseStats({ loafingCount: 1, thinkingCount: 1 }));
+    check('thinking > loafing', () => assert(w.elements('cat').classList.contains('thinking')));
+    w.handlers.stats(baseStats({ loafingCount: 1, workingCount: 1 }));
+    check('working > loafing', () => assert(w.elements('cat').classList.contains('working')));
   }
 
   console.log(`\n${failures === 0 ? '✅ RENDERER ALL PASS' : '❌ ' + failures + ' FAILURE(S)'}`);

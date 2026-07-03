@@ -33,8 +33,8 @@ function toolLabel(tool) { return TOOL_LABEL[tool] || tool || '处理中'; }
 // 「最近事件是工具活动」判定——op 标签只该跟着这些事件走
 const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop']);
 
-// 工具结束后超过这个间隙仍无事件 → 视为模型在推理（Thinking some more）
-const THINK_GAP_MS = 5000;
+// 工具结束后超过这个间隙仍无事件 → 摸鱼中（等下一步）
+const LOAF_GAP_MS = 5000;
 
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
@@ -233,13 +233,14 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     let reason = null;
     let choice = null;
 
-    // 「Thinking some more」：上一个工具已经结束、几秒内没有新事件 = 模型在
-    // 推理/组织下一步（CLI 里的 Thinking…），显示思考而不是一直「干活中」。
+    // 「上一步干完了、下一步还没来」的间隙：谁也不知道模型在干嘛（推理/流式
+    // 输出/事件丢了都有可能），别硬说是「思考中」——显示摸鱼（loafing）最诚实。
     // 只认 PostToolUse/SubagentStop 间隙——PreToolUse 间隙是工具还在跑，仍算干活。
+    // 真思考仍有渠道：UserPromptSubmit → thinking 是事件驱动的。
     if (state === 'working'
       && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
-      && e.idleMs > THINK_GAP_MS) {
-      state = 'thinking';
+      && e.idleMs > LOAF_GAP_MS) {
+      state = 'loafing';
     }
 
     const perm = permsBySession.get(e.id);
@@ -290,6 +291,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
   const jugglingCount = counted.filter((s) => s.state === 'juggling').length;
   const sweepingCount = counted.filter((s) => s.state === 'sweeping').length;
   const thinkingCount = counted.filter((s) => s.state === 'thinking').length;
+  const loafingCount = counted.filter((s) => s.state === 'loafing').length;
   const errorCount = counted.filter((s) => s.state === 'error').length;
 
   // Context usage of the active session (supplements the now-pricing-less chips).
@@ -338,6 +340,7 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     jugglingCount,
     sweepingCount,
     thinkingCount,
+    loafingCount,
     errorCount,
     todos: [],
     todosProject: '',

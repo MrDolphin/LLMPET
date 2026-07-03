@@ -296,6 +296,7 @@ body.skin-cat #cat { display: flex; }
 }
 /* 与会话列表 HUD 的 .sl-dot 同一套配色 */
 .sess-dot.working, .sess-dot.thinking, .sess-dot.juggling, .sess-dot.sweeping { background: #4a9eff; }
+.sess-dot.loafing { background: #8fb8e8; }
 .sess-dot.waiting { background: #ffb020; animation: dotPulse 0.9s ease-in-out infinite; }
 .sess-dot.needsinput { background: #ffb020; box-shadow: 0 0 0 2px rgba(255, 176, 32, 0.35); animation: dotPulse 1.4s ease-in-out infinite; }
 .sess-dot.error { background: #ff5a52; }
@@ -653,6 +654,7 @@ body.skin-cat #cat { display: flex; }
 .sl-row:hover { background: rgba(255, 255, 255, 0.07); }
 .sl-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: #8a8a8e; }
 .sl-dot.working, .sl-dot.thinking, .sl-dot.juggling, .sl-dot.sweeping { background: #4a9eff; box-shadow: 0 0 7px rgba(74, 158, 255, 0.65); }
+.sl-dot.loafing { background: #8fb8e8; }
 .sl-dot.waiting, .sl-dot.needsinput { background: #ffb020; box-shadow: 0 0 7px rgba(255, 176, 32, 0.65); }
 .sl-dot.error { background: #ff5a52; box-shadow: 0 0 7px rgba(255, 90, 82, 0.6); }
 .sl-dot.done { background: #34c759; }

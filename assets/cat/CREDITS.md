@@ -16,6 +16,9 @@
 | `cat-working-3.gif`  | working    | 捂着耳朵埋头猛敲键盘——干活轮换 |
 | `cat-working-4.gif`  | working    | 边吃零食边敲键盘——干活轮换 |
 | `cat-idle.gif`       | idle       | 转椅上冰淇淋+手机摸鱼——待命 |
+| `cat-loafing.gif`    | loafing    | 躺地上刷手机——工具间隙摸鱼（轮换第 1 张） |
+| `cat-loafing-2.gif`  | loafing    | 沙发上点外卖——摸鱼轮换 |
+| `cat-loafing-3.gif`  | loafing    | 靠着枕头奶瓶+手机——摸鱼轮换 |
 | `cat-roam.gif`       | roam       | 撒腿跑着玩——闲逛 |
 | `cat-thinking.gif`   | thinking   | 对着笔记本挠头——思考（轮换第 1 张） |
 | `cat-thinking-2.gif` | thinking   | 躺着想：头顶「浮云」思考泡——思考轮换 |

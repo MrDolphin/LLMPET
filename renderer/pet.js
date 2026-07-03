@@ -11,6 +11,7 @@ const MASCOT_EYES = {
   working: 'mascot-work.png', // 干活：对着笔记本敲代码 + 咖啡（整幅工作场景）
   juggling: 'mascot-work.png', // 并行子任务：无独立图，回落到干活
   sweeping: 'mascot-work.png', // 清理上下文：无独立图，回落到干活
+  loafing: 'mascot-sleep.png', // 间隙摸鱼：无独立图，回落到闭眼待机
   idle: 'mascot-sleep.png',   // 无任务：闭眼
   sleeping: 'mascot-sleep.png',
   thinking: 'mascot-think.png', // 思考：往上看
@@ -50,6 +51,7 @@ const CAT_STATES = {
   attention: 'cat-attention.gif', // 从工位起身够手机看消息：需要注意
   sleeping: 'cat-sleeping.gif',   // 被窝里睡成一坨：睡觉
   error: 'cat-error.gif',         // 抱头崩溃大叫：出错
+  loafing: 'cat-loafing.gif',     // 躺地上刷手机：上一步干完、等下一步的间隙摸鱼
   // 情绪短暂态 → 就近映射，别回落到摸鱼 idle 图（表情和文案会打架）
   loved: 'cat-happy.gif',         // 被夸 → 摸头开心
   excited: 'cat-happy.gif',
@@ -74,6 +76,11 @@ const CAT_POOLS = {
   sleeping: [
     'cat-sleeping.gif',   // 被窝里睡成一坨
     'cat-sleeping-2.gif', // 坐椅子上拔下肚子毛当眼罩睡
+  ],
+  loafing: [
+    'cat-loafing.gif',   // 躺地上刷手机
+    'cat-loafing-2.gif', // 沙发上点外卖
+    'cat-loafing-3.gif', // 靠着枕头奶瓶+手机
   ],
 };
 const POOL_ROTATE_MS = 60 * 1000;
@@ -617,10 +624,10 @@ const CLAUDE_ICON =
 const SESS_META = {
   waiting: '✋ 等你授权', needsinput: '💬 等你回复',
   working: '⚙️ 干活中', juggling: '🤹 并行子任务', sweeping: '🧹 清理上下文',
-  thinking: '💭 思考中', error: '😵 出错了',
+  thinking: '💭 思考中', loafing: '🍦 摸鱼中(等下一步)', error: '😵 出错了',
   idle: '空闲', sleeping: '💤 休息中',
 };
-const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2, sweeping: 2, thinking: 2, idle: 4, sleeping: 5 };
+const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2, sweeping: 2, thinking: 2, loafing: 3, idle: 4, sleeping: 5 };
 
 // 对齐参考项目阈值：≥90% 红(hot)、≥75% 黄(warm)、其余灰
 function ctxClass(p) { return p >= 90 ? 'high' : p >= 75 ? 'mid' : ''; }
@@ -773,7 +780,7 @@ buildPixel();
 // 前端会 setState 的全部状态词（聚合态 + 短暂态 + 情绪态）。
 // classList.remove 必须覆盖此全集，漏一个就会 class 残留在皮肤元素上。
 const STATE_WORDS = [
-  'idle', 'working', 'juggling', 'sweeping', 'happy', 'sleeping', 'waiting',
+  'idle', 'working', 'juggling', 'sweeping', 'loafing', 'happy', 'sleeping', 'waiting',
   'thinking', 'needsinput', 'error', 'greet', 'talking', 'attention', 'roam',
   'loved', 'sad', 'sorry', 'excited', 'puzzled',
 ];
@@ -1101,6 +1108,8 @@ function applyStats(s) {
     setState('working');
   } else if (s.thinkingCount > 0) {
     setState('thinking');
+  } else if (s.loafingCount > 0) {
+    setState('loafing'); // 工具间隙：上一步干完等下一步 → 摸鱼
   } else if (s.idleMs == null || s.idleMs > IDLE_SLEEP_MS) {
     // idleMs=null 表示已无任何活跃会话——什么都没发生就该睡觉；
     // 之前 null 落到 idle，桌宠永不入睡，睡着后会话被回收还会凭空惊醒。

@@ -19,6 +19,7 @@
 | <img src="assets/cat/cat-happy.gif" width="72" alt="完成庆祝"> | 🎉 **happy 完成庆祝** | 一轮任务干完（摸小猫的头夸夸） |
 | <img src="assets/cat/cat-greet.gif" width="72" alt="打招呼"> | 👋 **greet 打招呼** | 新会话开始（被闹钟炸醒弹射到工位） |
 | <img src="assets/cat/cat-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 执行失败 / API 报错（抱头崩溃大叫） |
+| <img src="assets/cat/cat-loafing.gif" width="72" alt="摸鱼"> <img src="assets/cat/cat-loafing-2.gif" width="72" alt="摸鱼2"> <img src="assets/cat/cat-loafing-3.gif" width="72" alt="摸鱼3"> | 🍦 **loafing 摸鱼** | 上一步干完、下一步还没来的间隙——摸鱼轮换：躺地刷手机 / 点外卖 / 奶瓶手机 |
 | <img src="assets/cat/cat-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 没有任务（转椅上冰淇淋+手机摸鱼） |
 | <img src="assets/cat/cat-roam.gif" width="72" alt="闲逛"> | 🚶 **roam 闲逛** | 长时间空闲（撒腿跑着玩） |
 | <img src="assets/cat/cat-sleeping.gif" width="72" alt="睡觉"> <img src="assets/cat/cat-sleeping-2.gif" width="72" alt="睡觉2"> | 😴 **sleeping 睡觉** | 会话结束 / 久无活动——睡姿轮换：被窝一坨 / 拔肚子毛当眼罩 |
