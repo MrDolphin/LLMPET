@@ -50,12 +50,21 @@ Claude Code ──(生命周期 hook)──► octopus-hook.js ──HTTP POST /
 
 ---
 
-## 运行
+## 安装与运行
+
+**前置条件**
+- macOS（状态显示全平台可用；「去回复」终端聚焦等功能目前仅 macOS）
+- Node.js ≥ 18（含 npm）
+- 已安装并用过 [Claude Code](https://claude.com/claude-code)（桌宠通过它的公开 hook 接口感知状态）
 
 ```bash
-npm install          # 装 electron
+git clone https://github.com/myunwang/LLMPET.git
+cd LLMPET
+npm install          # 装 electron（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install）
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
+
+启动后**新开**的 `claude` 会话即被感知（已开着的会话从下一个事件起出现）。右键桌宠可切三款皮肤。
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
 - **左键点桌宠** = 弹出**会话列表**（每行：状态点 + 会话名 + 上下文用量%），点某行把该会话的终端调到前台；没有会话时给「新开 Claude」按钮。
