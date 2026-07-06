@@ -73,11 +73,16 @@ const SESSION_STALE_MS = 30 * 60 * 1000;  // no live terminal + this idle → re
 const BACKFILL_MAX_AGE_MS = SESSION_STALE_MS; // on boot, seed sessions whose transcript changed within this
 const BACKFILL_MAX = 15;                  // cap seeded sessions
 
-// Map a session's cwd + id to its Claude Code transcript file. Claude Code
-// encodes the project dir by replacing every "/" and "." with "-".
+// The session's Claude Code transcript file. Prefer the real path CC hands us
+// (forwarded by the hook / captured during backfill); only fall back to deriving
+// it from cwd. CC encodes the project dir by replacing "/", "." AND "_" with "-"
+// — the old derivation missed "_", so ~30% of projects resolved to a nonexistent
+// dir and the 10s poll (interrupt / API-error / context refresh) silently died.
 function transcriptPathFor(s) {
-  if (!s || !s.cwd || !s.id) return null;
-  const enc = String(s.cwd).replace(/[/.]/g, '-');
+  if (!s) return null;
+  if (typeof s.transcriptPath === 'string' && s.transcriptPath) return s.transcriptPath;
+  if (!s.cwd || !s.id) return null;
+  const enc = String(s.cwd).replace(/[/._]/g, '-');
   return path.join(os.homedir(), '.claude', 'projects', enc, `${s.id}.jsonl`);
 }
 
@@ -138,6 +143,7 @@ function createCore(options = {}) {
     // Merge identity / focus fields only when provided (never clobber with null).
     setField(s, 'agentId', f.agentId);
     setField(s, 'cwd', f.cwd);
+    setField(s, 'transcriptPath', f.transcriptPath);
     setField(s, 'sourcePid', f.sourcePid);
     setField(s, 'pidChain', f.pidChain);
     setField(s, 'editor', f.editor);
@@ -337,7 +343,7 @@ function createCore(options = {}) {
       sessions.set(f.id, {
         id: f.id, createdAt: f.mtime, updatedAt: f.mtime,
         state: 'idle', recentEvents: [], agentId: 'claude-code',
-        cwd, sessionTitle: transcript.sessionTitle(entries) || null,
+        cwd, transcriptPath: f.fp, sessionTitle: transcript.sessionTitle(entries) || null,
         contextUsage: transcript.contextUsage(entries, f.id) || null,
         sourcePid: null, headless: false,
       });

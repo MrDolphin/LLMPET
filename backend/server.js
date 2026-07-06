@@ -8,6 +8,7 @@
 // payload (a data interface); every value is normalized/validated before use.
 
 const http = require('http');
+const path = require('path');
 const {
   SERVER_HEADER,
   SERVER_ID,
@@ -19,7 +20,11 @@ const {
 } = require('./transport');
 const { log } = require('./log');
 
-const MAX_STATE_BODY_BYTES = 4096;
+// A Stop event carries the assistant's last reply (up to ~2200 chars). In CJK
+// that is ~3 bytes/char ≈ 6.6KB, so a 4KB cap silently 413-dropped the whole
+// Stop for long Chinese replies (completion state + 💬 bubble lost). 16KB clears
+// the worst case with headroom; everything else in the body is small.
+const MAX_STATE_BODY_BYTES = 16 * 1024;
 const MAX_PERMISSION_BODY_BYTES = 1024 * 1024; // tool_input can be large
 const ASSISTANT_LAST_OUTPUT_MAX = 2400;
 
@@ -88,6 +93,32 @@ function isLoopback(req) {
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 }
 
+// Defense against DNS-rebinding: even when the TCP peer is loopback, a rebound
+// page reaches us with Host = attacker.com. Only accept loopback Host values.
+function hostAllowed(req) {
+  const host = String((req.headers && req.headers.host) || '').toLowerCase();
+  if (!host) return true; // some node clients omit Host on a raw socket
+  return /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+}
+
+// Our node hook never sets Origin/Referer; a browser fetch/XHR always attaches
+// Origin on cross-origin (and Referer on same-origin) requests. Reject any
+// request that carries one → blocks CSRF from a page the user is visiting.
+function fromBrowser(req) {
+  return !!(req.headers && (req.headers.origin || req.headers.referer));
+}
+
+// transcript_path is Claude Code's real path for the session's JSONL. Accept it
+// verbatim (so we never re-derive the encoded dir wrongly) after a light sanity
+// check: absolute, .jsonl, no control bytes.
+function normTranscriptPath(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  if (!t || t.length > 4096 || /[\0\r\n]/.test(t)) return null;
+  if (!t.endsWith('.jsonl') || !path.isAbsolute(t)) return null;
+  return t;
+}
+
 function readBody(req, cap, onDone) {
   let body = '';
   let size = 0;
@@ -134,6 +165,7 @@ function createServer(deps) {
         ghosttyTerminalId: typeof data.ghostty_terminal_id === 'string' && data.ghostty_terminal_id.trim() ? data.ghostty_terminal_id.trim() : null,
         agentId: 'claude-code',
         headless: data.headless === true,
+        transcriptPath: normTranscriptPath(data.transcript_path),
         model: typeof data.model === 'string' && data.model.trim() ? data.model.trim() : null,
         sessionTitle: typeof data.session_title === 'string' && data.session_title.trim() ? data.session_title.trim() : null,
         sessionSource: typeof data.session_source === 'string' && /^[a-z]{1,16}$/.test(data.session_source) ? data.session_source : null,
@@ -190,15 +222,24 @@ function createServer(deps) {
 
   function onRequest(req, res) {
     if (!isLoopback(req)) { res.writeHead(403); res.end(); return; }
+    if (!hostAllowed(req) || fromBrowser(req)) { res.writeHead(403); res.end('forbidden'); return; }
     if (req.method === 'GET' && req.url === '/state') {
       res.writeHead(200, { 'Content-Type': 'application/json', [SERVER_HEADER]: SERVER_ID });
       res.end(JSON.stringify({ ok: true, app: SERVER_ID, port: activePort || BASE_PORT }));
       return;
     }
     if (req.method === 'GET' && req.url === '/debug') {
+      // Off by default — it exposes session cwd/title/assistant text. Opt in with
+      // OCTOPUS_DEBUG=1, and even then drop the reply text and the absolute cwd.
+      if (process.env.OCTOPUS_DEBUG !== '1') { res.writeHead(404); res.end(); return; }
       const snap = core.buildSnapshot();
+      const safe = snap.sessions.map((s) => ({
+        ...s,
+        cwd: s.cwd ? path.basename(s.cwd) : '',
+        assistantLastOutput: undefined,
+      }));
       res.writeHead(200, { 'Content-Type': 'application/json', [SERVER_HEADER]: SERVER_ID });
-      res.end(JSON.stringify({ sessions: snap.sessions, pending: permissions.getPending().map((p) => ({ id: p.id, sessionId: p.sessionId, toolName: p.toolName })) }, null, 2));
+      res.end(JSON.stringify({ sessions: safe, pending: permissions.getPending().map((p) => ({ id: p.id, sessionId: p.sessionId, toolName: p.toolName })) }, null, 2));
       return;
     }
     if (req.method === 'POST' && req.url === '/state') return handleStatePost(req, res);

@@ -325,12 +325,13 @@ async function main() {
 
   console.log('\n[16] ESC 中断检测（transcript 发现，10s 巡检放下忙碌态）');
   const intSid = 'interrupt-session-nnnn';
-  const intCwd = path.join(os.tmpdir(), 'octo-int-test');
-  const projDir = path.join(os.homedir(), '.claude', 'projects', String(intCwd).replace(/[/.]/g, '-'));
-  fs.mkdirSync(projDir, { recursive: true });
-  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: intCwd });
+  // 像真实 hook 那样直接带 transcript_path（server 存 s.transcriptPath，core 直接读），
+  // 不再靠 cwd 反推编码目录 —— 也不再往用户真实的 ~/.claude/projects 写测试文件。
+  const intDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-int-'));
+  const intFile = path.join(intDir, `${intSid}.jsonl`);
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: '/Users/me/octo-int', transcript_path: intFile });
   await sleep(30);
-  fs.writeFileSync(path.join(projDir, `${intSid}.jsonl`),
+  fs.writeFileSync(intFile,
     JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }) + '\n');
   core.cleanStaleSessions();
   check('中断后忙碌态被放下（不再等 5 分钟）', () => assert.strictEqual(core.getSession(intSid).state, 'idle'));
@@ -341,19 +342,17 @@ async function main() {
   }
   // 新事件到达（用户继续）→ lastEvent 晚于中断标记 → 不再触发
   await sleep(30);
-  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: intCwd });
+  await post('/state', { state: 'working', event: 'PreToolUse', tool_name: 'Bash', session_id: intSid, cwd: '/Users/me/octo-int', transcript_path: intFile });
   core.cleanStaleSessions();
   check('中断后继续对话不误判', () => assert.strictEqual(core.getSession(intSid).state, 'working'));
-  fs.rmSync(projDir, { recursive: true, force: true });
+  fs.rmSync(intDir, { recursive: true, force: true });
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   console.log('\n[18] 网络重试检测：API 错误间隙不再误判成思考中');
   const netSid = 'netretry-session-rrrr';
-  const netCwd = path.join(os.tmpdir(), 'octo-net-test');
-  const netDir = path.join(os.homedir(), '.claude', 'projects', String(netCwd).replace(/[/.]/g, '-'));
-  fs.mkdirSync(netDir, { recursive: true });
+  const netDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octo-net-'));
   const netFile = path.join(netDir, `${netSid}.jsonl`);
-  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: netSid, cwd: netCwd });
+  await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: netSid, cwd: '/Users/me/octo-net', transcript_path: netFile });
   await sleep(30);
   fs.writeFileSync(netFile,
     JSON.stringify({ type: 'assistant', isApiErrorMessage: true, error: 'server_error', sessionId: netSid, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: Connection closed mid-response.' }] } }) + '\n');

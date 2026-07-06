@@ -239,7 +239,15 @@ function bootBackend() {
   // Pricing sync: fetches LiteLLM's open pricing JSON once on boot + every 24h.
   // metering.loadPricing() now reads ~/.octopus/pricing-cache.json beneath the
   // user override. Public-data only — no credentials, no API calls.
-  pricingSync = createPricingSync({ onUpdate: scheduleEmit });
+  // On a fresh sync: reload the in-memory price table (so new prices apply this
+  // run, not next restart) and push the updated source line to the panel.
+  pricingSync = createPricingSync({
+    onUpdate: () => {
+      if (metering) { try { metering.reloadPricing(); } catch {} }
+      if (metering) sendPanel('panel:price', metering.priceInfo());
+      scheduleEmit();
+    },
+  });
   pricingSync.start();
 
   permissions = createPermissions({
@@ -407,7 +415,7 @@ function buildTray() {
   tray = new Tray(img || nativeImage.createEmpty());
   tray.setToolTip('Octopus — Claude Code 桌宠');
   refreshTrayMenu();
-  tray.on('click', () => { if (petWin) petWin.isVisible() ? petWin.show() : petWin.show(); });
+  tray.on('click', () => { if (petWin) petWin.show(); });
 }
 
 function refreshTrayMenu() {
@@ -421,7 +429,12 @@ function refreshTrayMenu() {
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
-    { label: '🧹 卸载 Claude 钩子', click: () => hooks.uninstall() },
+    { label: '🧹 卸载 Claude 钩子', click: () => {
+      // Stop the settings watcher first — otherwise it sees our hooks vanish and
+      // re-registers them within 800ms, silently undoing this uninstall.
+      try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
+      hooks.uninstall();
+    } },
     { label: '⏻ 退出', click: () => app.quit() },
   ]));
 }

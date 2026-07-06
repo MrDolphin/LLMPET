@@ -441,8 +441,14 @@ function finishChoice(choice, bubbleMsg) {
   answered.add(choiceKey(choice));
   elic = null;
   askQueue = askQueue.filter((c) => choiceKey(c) !== choiceKey(choice));
-  showBubble(bubbleMsg, 2600);
-  if (askQueue.length) { askIdx = 0; showAskPanel(); } else hideAsk();
+  if (askQueue.length) {
+    // 还有下一题：直接展示，不弹确认气泡盖住选项面板
+    askIdx = 0; showAskPanel();
+  } else {
+    // 先关面板（置 askActive=false），确认气泡才不会被 showBubble 的 askActive 早退拦掉
+    hideAsk();
+    showBubble(bubbleMsg, 2600);
+  }
 }
 function submitPerm(key, choice, label) {
   window.pet.decidePermission(choice.permId, key);

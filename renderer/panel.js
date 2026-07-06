@@ -275,7 +275,7 @@ window.pet.onPrice((m) => {
   if (!el || !m) return;
   if (m.live) {
     const when = m.ts ? new Date(m.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '缓存';
-    el.textContent = `💲 价目：在线 ${m.count} 型号 · ${when} 更新（每12h自动）`;
+    el.textContent = `💲 价目：在线 ${m.count} 型号 · ${when} 更新（每24h自动）`;
   } else {
     el.textContent = '💲 价目：内置兜底表（在线源暂不可用）';
   }
