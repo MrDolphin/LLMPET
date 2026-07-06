@@ -88,11 +88,12 @@ function emptyDay() {
 }
 
 function createMetering() {
-  const pricing = loadPricing();
+  let pricing = loadPricing();
 
   // Persisted state.
   let state = {
     cursors: {},          // filePath -> byte offset already consumed
+    seen: {},             // `${msgId}|${requestId}` -> dayKey, dedupe across files/runs
     daily: {},            // 'YYYY-MM-DD' -> { cost, tokens, msgs, input, output, cacheCreate, cacheRead }
     byModelByDay: {},     // 'YYYY-MM-DD' -> { model: { cost, tokens } }
     hourlyByDay: {},      // 'YYYY-MM-DD' -> [24] cost
@@ -107,6 +108,7 @@ function createMetering() {
       const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
       if (raw && typeof raw === 'object') {
         state.cursors = raw.cursors && typeof raw.cursors === 'object' ? raw.cursors : {};
+        state.seen = raw.seen && typeof raw.seen === 'object' ? raw.seen : {};
         state.daily = raw.daily && typeof raw.daily === 'object' ? raw.daily : {};
         state.byModelByDay = raw.byModelByDay && typeof raw.byModelByDay === 'object' ? raw.byModelByDay : {};
         state.hourlyByDay = raw.hourlyByDay && typeof raw.hourlyByDay === 'object' ? raw.hourlyByDay : {};
@@ -140,6 +142,8 @@ function createMetering() {
     for (const k of Object.keys(state.daily)) if (k < cutoff) delete state.daily[k];
     for (const k of Object.keys(state.byModelByDay)) if (k < cutoff) delete state.byModelByDay[k];
     for (const k of Object.keys(state.hourlyByDay)) if (k < cutoff) delete state.hourlyByDay[k];
+    // Bound the dedupe set to the retention window (dayKey values sort lexically).
+    for (const k of Object.keys(state.seen)) if (state.seen[k] < cutoff) delete state.seen[k];
   }
 
   // Add one deduped assistant usage record into the aggregates.
@@ -204,7 +208,6 @@ function createMetering() {
     if (st.size <= offset) return;
 
     const { lines, newOffset } = await readNewLines(file, offset, st.size);
-    const seen = new Set(); // dedupe streaming-duplicate ids within this batch
     for (const line of lines) {
       if (!line || line.charCodeAt(0) !== 123) continue; // fast skip non-'{' lines
       let o;
@@ -215,10 +218,13 @@ function createMetering() {
       if (!usage || typeof usage !== 'object') continue;
       const id = msg.id || `${o.requestId || ''}:${o.timestamp || ''}`;
       const key = `${id}|${o.requestId || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      // Dedupe globally, not just within this batch: streaming writes the same id
+      // on several lines, and resume/fork copies prior turns (same id) into a NEW
+      // file — a per-batch Set missed both of those and double-billed the tokens.
+      if (state.seen[key]) continue;
       const tsMs = o.timestamp ? Date.parse(o.timestamp) : st.mtimeMs;
       if (!Number.isFinite(tsMs)) continue;
+      state.seen[key] = dayKey(tsMs);
       record(tsMs, msg.model || 'unknown', usage);
     }
     state.cursors[file] = newOffset;
@@ -244,7 +250,9 @@ function createMetering() {
     try {
       const files = await listTranscripts();
       for (const file of files) {
-        await scanFile(file);
+        // Isolate per file: a single unreadable/poison transcript must not abort
+        // the whole loop and starve every file after it, scan after scan.
+        try { await scanFile(file); } catch (e) { log('meter', 'scanFile failed:', file, e.message); }
       }
       pruneRecent();
       pruneDaily();
@@ -287,8 +295,24 @@ function createMetering() {
     return { today, window5h, byModel, hourly, daily };
   }
 
+  // Re-read the price table (call after a LiteLLM sync lands a fresh cache).
+  function reloadPricing() { pricing = loadPricing(); }
+
+  // Report the price table the UI is actually using — the old hard-coded
+  // { live:false, source:'builtin' } told every online user their sync failed.
   function priceInfo() {
-    return { live: false, count: Object.keys(DEFAULT_PRICING).length - 1, ts: 0, source: 'builtin' };
+    let live = false;
+    let ts = 0;
+    let count = Object.keys(DEFAULT_PRICING).length - 1;
+    let source = 'builtin';
+    try {
+      const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
+      if (c && c.pricing && typeof c.pricing === 'object' && Object.keys(c.pricing).length) {
+        live = true; ts = Number(c.ts) || 0; count = Object.keys(c.pricing).length; source = 'litellm';
+      }
+    } catch {}
+    try { fs.accessSync(PRICING_OVERRIDE_PATH); live = true; source = 'override'; } catch {}
+    return { live, count, ts, source };
   }
 
   let timer = null;
@@ -304,7 +328,7 @@ function createMetering() {
     saveNow(); // always flush the latest aggregates on quit
   }
 
-  return { start, stop, scan, getStats, priceInfo, _state: state };
+  return { start, stop, scan, getStats, priceInfo, reloadPricing, _state: state };
 }
 
 function num(v) {

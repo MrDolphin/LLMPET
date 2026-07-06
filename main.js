@@ -239,8 +239,22 @@ function bootBackend() {
   // Pricing sync: fetches LiteLLM's open pricing JSON once on boot + every 24h.
   // metering.loadPricing() now reads ~/.octopus/pricing-cache.json beneath the
   // user override. Public-data only — no credentials, no API calls.
-  pricingSync = createPricingSync({ onUpdate: scheduleEmit });
-  pricingSync.start();
+  // On a fresh sync: reload the in-memory price table (so new prices apply this
+  // run, not next restart) and push the updated source line to the panel.
+  // OCTOPUS_NO_NET=1 keeps the app fully offline (the pricing fetch is the ONLY
+  // outbound request Octopus ever makes) — falls back to the built-in price table.
+  if (process.env.OCTOPUS_NO_NET === '1') {
+    log('main', 'OCTOPUS_NO_NET=1 — pricing sync disabled (fully offline)');
+  } else {
+    pricingSync = createPricingSync({
+      onUpdate: () => {
+        if (metering) { try { metering.reloadPricing(); } catch {} }
+        if (metering) sendPanel('panel:price', metering.priceInfo());
+        scheduleEmit();
+      },
+    });
+    pricingSync.start();
+  }
 
   permissions = createPermissions({
     // muted only silences sound (renderer-side); it is NOT do-not-disturb, so we
@@ -262,6 +276,10 @@ function bootBackend() {
           { id: entry.id, sessionId: entry.sessionId, toolName: entry.toolName, toolInput: entry.toolInput, suggestions: entry.suggestions }, lite);
         kind = 'waiting'; reason = '授权';
       }
+      // A parked permission needs the user's eyes. In menubar mode (or if the pet
+      // was hidden) the ask panel would render into an invisible window and CC
+      // would hang until the park times out — so surface the pet window first.
+      try { if (petWin && !petWin.isDestroyed() && !petWin.isVisible()) petWin.show(); } catch {}
       sendPet('pet:event', { kind, project: choice.project, reason, sessionId: entry.sessionId, choice, ts: Date.now() });
       scheduleEmit();
     },
@@ -407,7 +425,7 @@ function buildTray() {
   tray = new Tray(img || nativeImage.createEmpty());
   tray.setToolTip('Octopus — Claude Code 桌宠');
   refreshTrayMenu();
-  tray.on('click', () => { if (petWin) petWin.isVisible() ? petWin.show() : petWin.show(); });
+  tray.on('click', () => { if (petWin) petWin.show(); });
 }
 
 function refreshTrayMenu() {
@@ -421,7 +439,12 @@ function refreshTrayMenu() {
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
-    { label: '🧹 卸载 Claude 钩子', click: () => hooks.uninstall() },
+    { label: '🧹 卸载 Claude 钩子', click: () => {
+      // Stop the settings watcher first — otherwise it sees our hooks vanish and
+      // re-registers them within 800ms, silently undoing this uninstall.
+      try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
+      hooks.uninstall();
+    } },
     { label: '⏻ 退出', click: () => app.quit() },
   ]));
 }

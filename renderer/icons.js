@@ -69,10 +69,9 @@
     '⏻': 'power',
   };
 
-  const EMOJI_RE = new RegExp(
-    '(' + Object.keys(EMOJI_TO_ICON).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')',
-    'g'
-  );
+  const EMOJI_SRC = '(' + Object.keys(EMOJI_TO_ICON).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')';
+  const EMOJI_RE = new RegExp(EMOJI_SRC, 'g');       // for replace-all in withIcons
+  const EMOJI_TEST_RE = new RegExp(EMOJI_SRC);       // no /g — .test() must be stateless
 
   // Take a plain string, escape it (HTML-safe), then swap known emoji for SVG.
   // Output is intended for innerHTML; surrounding user text is already escaped.
@@ -89,7 +88,9 @@
   // Detect: does this string contain any of our mapped emoji? If not, callers
   // can keep using textContent for speed — useful in hot paths.
   function hasMappedEmoji(text) {
-    return EMOJI_RE.test(String(text == null ? '' : text));
+    // Use the non-global regex: a /g regex's .test() advances lastIndex and
+    // wouldn't reset, so repeated calls on the same string flip true/false/true…
+    return EMOJI_TEST_RE.test(String(text == null ? '' : text));
   }
 
   root.OctoIcons = { icon, withIcons, setTextWithIcons, hasMappedEmoji, EMOJI_TO_ICON };

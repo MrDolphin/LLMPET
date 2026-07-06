@@ -67,6 +67,10 @@ function buildBody(event, p) {
   const sid = p.session_id;
   const body = { state, event, session_id: sid };
   if (typeof p.cwd === 'string' && p.cwd) body.cwd = p.cwd;
+  // Forward CC's real transcript path so the server never has to re-derive the
+  // encoded project dir (its /._→- guess missed '_', breaking the 10s poll for
+  // ~30% of projects: interrupt/API-error/context refresh went silent there).
+  if (typeof p.transcript_path === 'string' && p.transcript_path) body.transcript_path = p.transcript_path;
   if (typeof p.tool_name === 'string' && p.tool_name) body.tool_name = p.tool_name;
   if (typeof p.model === 'string' && p.model) body.model = p.model;
   if (p.stop_hook_active === true) body.stop_hook_active = true;
