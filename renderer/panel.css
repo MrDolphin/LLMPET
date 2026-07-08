@@ -21,6 +21,11 @@ html, body {
 /* 隐藏滚动条：触控板/滚轮照常滚，视觉更干净 */
 #card::-webkit-scrollbar { width: 0; height: 0; }
 
+/* 双列区：用横向空间，左列花费明细、右列活动流 */
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; padding: 0 16px; align-items: start; }
+.cols .col { display: flex; flex-direction: column; min-width: 0; }
+.cols .block { padding: 8px 0; }
+
 /* 标题栏 */
 #titlebar {
   -webkit-app-region: drag;

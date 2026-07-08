@@ -145,8 +145,8 @@ function createPetWindow() {
 function openPanel() {
   if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
   panelWin = new BrowserWindow({
-    width: 480,
-    height: 760,
+    width: 560,
+    height: 780,
     frame: false,
     transparent: false,
     resizable: true,

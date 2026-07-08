@@ -68,36 +68,42 @@
         <div id="price-src" class="price-src" title="价目数据来源与更新时间"></div>
       </section>
 
-      <section class="block">
-        <div class="block-title">Token 明细（今日 · 总）</div>
-        <div class="rows" id="token-rows">
-          <div class="row"><span>输入</span><b id="t-in">0</b></div>
-          <div class="row"><span>输出</span><b id="t-out">0</b></div>
-          <div class="row"><span>缓存写入</span><b id="t-cw">0</b></div>
-          <div class="row"><span>缓存读取</span><b id="t-cr">0</b></div>
-          <div class="row total"><span>消息轮次</span><b id="t-msg">0</b></div>
+      <div class="cols">
+        <div class="col">
+          <section class="block">
+            <div class="block-title">Token 明细（今日 · 总）</div>
+            <div class="rows" id="token-rows">
+              <div class="row"><span>输入</span><b id="t-in">0</b></div>
+              <div class="row"><span>输出</span><b id="t-out">0</b></div>
+              <div class="row"><span>缓存写入</span><b id="t-cw">0</b></div>
+              <div class="row"><span>缓存读取</span><b id="t-cr">0</b></div>
+              <div class="row total"><span>消息轮次</span><b id="t-msg">0</b></div>
+            </div>
+          </section>
+
+          <section class="block">
+            <div class="block-title">按模型（分）</div>
+            <div id="by-model" class="rows"><div class="empty">暂无数据</div></div>
+          </section>
         </div>
-      </section>
 
-      <section class="block">
-        <div class="block-title">进行中的任务</div>
-        <div id="sess-list" class="rows"><div class="empty">暂无活跃会话</div></div>
-      </section>
+        <div class="col">
+          <section class="block">
+            <div class="block-title">进行中的任务</div>
+            <div id="sess-list" class="rows"><div class="empty">暂无活跃会话</div></div>
+          </section>
 
-      <section class="block">
-        <div id="bg-head" class="block-title">后台任务</div>
-        <div id="bg-list" class="rows"><div class="empty">没有长跑的后台进程 — 干净</div></div>
-      </section>
+          <section class="block">
+            <div id="bg-head" class="block-title">后台任务</div>
+            <div id="bg-list" class="rows"><div class="empty">没有长跑的后台进程 — 干净</div></div>
+          </section>
 
-      <section class="block">
-        <div class="block-title">按模型（分）</div>
-        <div id="by-model" class="rows"><div class="empty">暂无数据</div></div>
-      </section>
-
-      <section class="block grow">
-        <div class="block-title">实时操作</div>
-        <ul id="ops" class="ops"><li class="empty">等待操作…</li></ul>
-      </section>
+          <section class="block grow">
+            <div class="block-title">实时操作</div>
+            <ul id="ops" class="ops"><li class="empty">等待操作…</li></ul>
+          </section>
+        </div>
+      </div>
 
       <footer id="settings">
         <div class="seg-row">
