@@ -439,6 +439,11 @@ function applySkin(skin) {
   broadcastConfig();
   refreshTrayMenu();
 }
+function applyBudget(v) {
+  config.save({ budget5h: Number(v) || 0 });
+  broadcastConfig();
+  refreshTrayMenu();
+}
 
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
@@ -459,6 +464,7 @@ function refreshTrayMenu() {
   const muted = cfg.muted;
   const skin = cfg.skin || 'mascot';
   const mode = cfg.mode || 'pet';
+  const budget = Number(cfg.budget5h) || 0;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '📊 详情面板', click: openPanel },
     { label: '🐙 显示桌宠', click: () => petWin && petWin.show() },
@@ -473,6 +479,14 @@ function refreshTrayMenu() {
       { label: '浮游桌宠', type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
       { label: '角落面板', type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
       { label: '菜单栏（隐藏桌宠）', type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
+    ] },
+    { label: '　5h 预算', submenu: [
+      { label: '关闭', type: 'radio', checked: !budget, click: () => applyBudget(0) },
+      { label: '$10', type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
+      { label: '$20', type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
+      { label: '$30', type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
+      { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
+      { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
     { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
     { type: 'separator' },

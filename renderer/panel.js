@@ -100,9 +100,10 @@ function fitPanelHeight() {
   if (fitRaf) cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
     fitRaf = 0;
-    const card = $('card'); const foot = $('settings');
-    if (!card || !foot) return;
-    const h = Math.ceil(foot.getBoundingClientRect().bottom - card.getBoundingClientRect().top + card.scrollTop) + 2;
+    const card = $('card');
+    const last = card && card.lastElementChild; // 内容最后一块（footer 已移除）
+    if (!card || !last) return;
+    const h = Math.ceil(last.getBoundingClientRect().bottom - card.getBoundingClientRect().top + card.scrollTop) + 14; // +底部呼吸留白
     if (h > 0) window.pet.setPanelHeight(h);
   });
 }
@@ -305,8 +306,8 @@ function applyConfigUI() {
   document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     b.classList.toggle('active', b.dataset.skin === (config.skin || 'mascot'))
   );
-  const bi = $('budget');
-  if (document.activeElement !== bi) bi.value = config.budget5h || '';
+  const bi = $('budget'); // 预算输入已移到托盘；面板里不再有该元素
+  if (bi && document.activeElement !== bi) bi.value = config.budget5h || '';
 }
 
 // 事件
@@ -342,10 +343,13 @@ document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     window.pet.setSkin(b.dataset.skin);
   })
 );
-$('budget').addEventListener('change', (e) => {
-  config.budget5h = Number(e.target.value) || 0;
-  window.pet.setBudget(config.budget5h);
-});
+{ // 预算输入已移到托盘；面板存在旧元素时才接线（向后兼容）
+  const bi = $('budget');
+  if (bi) bi.addEventListener('change', (e) => {
+    config.budget5h = Number(e.target.value) || 0;
+    window.pet.setBudget(config.budget5h);
+  });
+}
 
 // 视图切换：24h / 日历
 document.querySelectorAll('.view-tabs .vt').forEach((b) =>
