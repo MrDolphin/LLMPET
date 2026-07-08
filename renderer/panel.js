@@ -89,6 +89,23 @@ function render(s) {
       )
       .join('');
   }
+  fitPanelHeight();
+}
+
+// 面板按内容高度自适应：量出内容底边（footer 底）到卡片顶的距离，通知主进程调窗口高，
+// 避免固定高窗口在内容变短时露出大片空白。requestAnimationFrame 确保布局已完成。
+let fitRaf = 0;
+function fitPanelHeight() {
+  if (!window.pet || !window.pet.setPanelHeight) return;
+  if (fitRaf) cancelAnimationFrame(fitRaf);
+  fitRaf = requestAnimationFrame(() => {
+    fitRaf = 0;
+    const card = $('card');
+    const last = card && card.lastElementChild; // 内容最后一块（footer 已移除）
+    if (!card || !last) return;
+    const h = Math.ceil(last.getBoundingClientRect().bottom - card.getBoundingClientRect().top + card.scrollTop) + 14; // +底部呼吸留白
+    if (h > 0) window.pet.setPanelHeight(h);
+  });
 }
 
 // 按模型明细：每模型一行 = 名称 + 占比条 + $花费 + token/占比；下方灰字给出
@@ -218,6 +235,9 @@ function renderSessList(sessions) {
 
 const TODO_ICON = { completed: '✅', in_progress: '▶️', pending: '⬜️' };
 function renderTodos(todos, proj) {
+  // 空待办不占版面（待办常年为空）——整块收起
+  const block = $('todo-block');
+  if (block) block.style.display = todos.length ? '' : 'none';
   const el = $('todo-list');
   if (!el) return;
   const prog = $('todo-prog');
@@ -256,6 +276,9 @@ function renderBg(bg) {
   const el = $('bg-list');
   if (!el) return;
   const items = (bg.items || []).filter((x) => x.alive); // 只列还活着的
+  // 没有后台进程时整块收起，不占版面
+  const block = $('bg-block');
+  if (block) block.style.display = items.length ? '' : 'none';
   const head = $('bg-head');
   if (head) head.textContent = `后台任务 ✅${bg.running || 0} · 🧟${bg.zombie || 0}`;
   if (!items.length) {
@@ -283,8 +306,8 @@ function applyConfigUI() {
   document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     b.classList.toggle('active', b.dataset.skin === (config.skin || 'mascot'))
   );
-  const bi = $('budget');
-  if (document.activeElement !== bi) bi.value = config.budget5h || '';
+  const bi = $('budget'); // 预算输入已移到托盘；面板里不再有该元素
+  if (bi && document.activeElement !== bi) bi.value = config.budget5h || '';
 }
 
 // 事件
@@ -320,10 +343,13 @@ document.querySelectorAll('#skin-seg .seg-btn').forEach((b) =>
     window.pet.setSkin(b.dataset.skin);
   })
 );
-$('budget').addEventListener('change', (e) => {
-  config.budget5h = Number(e.target.value) || 0;
-  window.pet.setBudget(config.budget5h);
-});
+{ // 预算输入已移到托盘；面板存在旧元素时才接线（向后兼容）
+  const bi = $('budget');
+  if (bi) bi.addEventListener('change', (e) => {
+    config.budget5h = Number(e.target.value) || 0;
+    window.pet.setBudget(config.budget5h);
+  });
+}
 
 // 视图切换：24h / 日历
 document.querySelectorAll('.view-tabs .vt').forEach((b) =>

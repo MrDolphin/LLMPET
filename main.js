@@ -35,6 +35,7 @@ const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
 
 let petWin = null;
 let panelWin = null;
+let panelH = 0; // 面板当前自适应高度（防抖用）
 let tray = null;
 let core = null;
 let metering = null;
@@ -144,14 +145,16 @@ function createPetWindow() {
 
 function openPanel() {
   if (panelWin && !panelWin.isDestroyed()) { panelWin.show(); panelWin.focus(); return; }
+  panelH = 0; // 每次开面板重置自适应高度基准
   panelWin = new BrowserWindow({
-    width: 400,
-    height: 700,
+    width: 560,
+    height: 720,
     frame: false,
     transparent: false,
     resizable: true,
     skipTaskbar: false,
-    backgroundColor: '#1b1b1f',
+    show: false, // 先隐藏，首帧按内容定高后再显示，避免闪一下大窗口
+    backgroundColor: '#2c1f1a',
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
@@ -165,6 +168,8 @@ function openPanel() {
     sendPanel('panel:config', frontendConfig());
     if (lastStats) sendPanel('panel:stats', lastStats);
     if (metering) sendPanel('panel:price', metering.priceInfo());
+    // 首帧渲染 + setPanelHeight 已到位后再显示
+    setTimeout(() => { try { if (panelWin && !panelWin.isDestroyed()) panelWin.show(); } catch {} }, 90);
   });
   panelWin.on('closed', () => { panelWin = null; });
 }
@@ -339,14 +344,19 @@ function registerIpc() {
   ipcMain.on('open-panel', openPanel);
   ipcMain.on('close-panel', closePanel);
 
-  ipcMain.on('set-mode', (_e, mode) => {
-    config.save({ mode });
-    if (mode === 'panel') openPanel();
-    else if (mode === 'pet' && petWin) petWin.show();
-    else if (mode === 'menubar' && petWin) petWin.hide();
-    broadcastConfig();
+  // 详情面板按内容高度自适应：clamp 到屏幕工作区，阈值防抖避免每次 stats 都抖
+  ipcMain.on('set-panel-height', (_e, h) => {
+    if (!panelWin || panelWin.isDestroyed() || !Number.isFinite(h)) return;
+    const b = panelWin.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    const clamped = Math.max(320, Math.min(Math.round(h), wa.height - 24));
+    if (Math.abs(clamped - panelH) < 6) return;
+    panelH = clamped;
+    panelWin.setBounds({ x: b.x, y: b.y, width: b.width, height: clamped });
   });
-  ipcMain.on('set-skin', (_e, skin) => { config.save({ skin }); broadcastConfig(); });
+
+  ipcMain.on('set-mode', (_e, mode) => applyMode(mode));
+  ipcMain.on('set-skin', (_e, skin) => applySkin(skin));
   ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
 
@@ -415,6 +425,26 @@ function registerIpc() {
   ipcMain.on('pet-log', (_e, tag, msg) => { log('ui:' + String(tag || ''), String(msg || '')); });
 }
 
+// ── settings actions (shared by tray menu + panel IPC) ─────────────────────────
+function applyMode(mode) {
+  config.save({ mode });
+  if (mode === 'panel') openPanel();
+  else if (mode === 'pet' && petWin) petWin.show();
+  else if (mode === 'menubar' && petWin) petWin.hide();
+  broadcastConfig();
+  refreshTrayMenu();
+}
+function applySkin(skin) {
+  config.save({ skin });
+  broadcastConfig();
+  refreshTrayMenu();
+}
+function applyBudget(v) {
+  config.save({ budget5h: Number(v) || 0 });
+  broadcastConfig();
+  refreshTrayMenu();
+}
+
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
   let img;
@@ -430,12 +460,36 @@ function buildTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  const muted = config.get().muted;
+  const cfg = config.get();
+  const muted = cfg.muted;
+  const skin = cfg.skin || 'mascot';
+  const mode = cfg.mode || 'pet';
+  const budget = Number(cfg.budget5h) || 0;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '📊 详情面板', click: openPanel },
     { label: '🐙 显示桌宠', click: () => petWin && petWin.show() },
     { type: 'separator' },
-    { label: muted ? '🔔 取消静音' : '🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
+    { label: '⚙️ 设置', enabled: false },
+    { label: '　形象', submenu: [
+      { label: '章鱼', type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
+      { label: '像素怪兽', type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
+      { label: '月薪喵', type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
+    ] },
+    { label: '　形态', submenu: [
+      { label: '浮游桌宠', type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
+      { label: '角落面板', type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
+      { label: '菜单栏（隐藏桌宠）', type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
+    ] },
+    { label: '　5h 预算', submenu: [
+      { label: '关闭', type: 'radio', checked: !budget, click: () => applyBudget(0) },
+      { label: '$10', type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
+      { label: '$20', type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
+      { label: '$30', type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
+      { label: '$50', type: 'radio', checked: budget === 50, click: () => applyBudget(50) },
+      { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
+    ] },
+    { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
+    { type: 'separator' },
     { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
     { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
