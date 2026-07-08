@@ -218,6 +218,9 @@ function renderSessList(sessions) {
 
 const TODO_ICON = { completed: '✅', in_progress: '▶️', pending: '⬜️' };
 function renderTodos(todos, proj) {
+  // 空待办不占版面（待办常年为空）——整块收起
+  const block = $('todo-block');
+  if (block) block.style.display = todos.length ? '' : 'none';
   const el = $('todo-list');
   if (!el) return;
   const prog = $('todo-prog');
@@ -256,6 +259,9 @@ function renderBg(bg) {
   const el = $('bg-list');
   if (!el) return;
   const items = (bg.items || []).filter((x) => x.alive); // 只列还活着的
+  // 没有后台进程时整块收起，不占版面
+  const block = $('bg-block');
+  if (block) block.style.display = items.length ? '' : 'none';
   const head = $('bg-head');
   if (head) head.textContent = `后台任务 ✅${bg.running || 0} · 🧟${bg.zombie || 0}`;
   if (!items.length) {
