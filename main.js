@@ -36,6 +36,7 @@ const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
 
 let petWin = null;
 let panelWin = null;
+let patrolPointerWin = null; // 独立巡视鼠标:只显示代理指针,永不接收输入/焦点
 let panelH = 0; // 面板当前自适应高度（防抖用）
 let tray = null;
 let core = null;
@@ -187,6 +188,53 @@ function closePanel() {
   panelWin = null;
 }
 
+function createPatrolPointerWindow() {
+  if (process.platform !== 'darwin' || (patrolPointerWin && !patrolPointerWin.isDestroyed())) return;
+  patrolPointerWin = new BrowserWindow({
+    width: 58,
+    height: 58,
+    x: -200,
+    y: -200,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    focusable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  patrolPointerWin.setIgnoreMouseEvents(true);
+  patrolPointerWin.setAlwaysOnTop(true, 'screen-saver');
+  try { patrolPointerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+  hardenWindow(patrolPointerWin);
+  patrolPointerWin.loadFile(path.join(__dirname, 'renderer', 'patrol-pointer.html'));
+  patrolPointerWin.on('closed', () => { patrolPointerWin = null; });
+}
+
+function setPatrolPointer(point) {
+  if (!point) {
+    try { if (patrolPointerWin && !patrolPointerWin.isDestroyed()) patrolPointerWin.hide(); } catch {}
+    return;
+  }
+  createPatrolPointerWindow();
+  if (!patrolPointerWin || patrolPointerWin.isDestroyed()) return;
+  // SVG 光标尖端位于局部 (8,8),所以窗口原点减去该 hotspot。
+  try {
+    patrolPointerWin.setPosition(Math.round(point.x - 8), Math.round(point.y - 8), false);
+    patrolPointerWin.setOpacity(point.pressed ? 1 : 0.82);
+    patrolPointerWin.showInactive();
+    patrolPointerWin.moveTop();
+  } catch {}
+}
+
 // ── 领地模式(territory) ─────────────────────────────────────────────────────
 // 宠物窗口平滑走位原语(驱逐战专用)。petGuided 挡住 moved 持久化;结束后延迟
 // 一拍再放开 —— macOS 的 moved 事件可能晚于最后一次 setBounds 才派发。
@@ -270,9 +318,10 @@ function bootTerritory() {
       });
     },
     endPetFrames: () => { setTimeout(() => { petFrameGuided = false; }, 300); },
+    setPatrolPointer,
     setPetClickThrough: (on) => {
       if (!petWin || petWin.isDestroyed()) return;
-      // 物理拖拽对手时，最高层的自己必须完全穿透，否则 CGEvent 会点中自己。
+      // 定向拖拽对手时，最高层的自己必须完全穿透，否则事件会点中自己。
       // 结束后也先恢复为透明区穿透；renderer 收到 forwarded mousemove 后会
       // 只在真实宠物内容上重新接管。不能设 false，否则整块透明窗会挡住 Codex 输入。
       petWin.setIgnoreMouseEvents(true, { forward: !on });
@@ -744,6 +793,7 @@ if (!gotTheLock) {
     registerIpc();
     bootBackend();
     createPetWindow();
+    createPatrolPointerWindow();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
     log('main', 'Octopus ready');
@@ -754,6 +804,7 @@ app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
+  try { setPatrolPointer(null); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}
   try { if (server) server.stop(); } catch {}

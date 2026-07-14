@@ -289,6 +289,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //   assertTop()            — 猫爪在上:窗口层级抬到 screen-saver + moveTop
 //   relaxTop()             — 对手都走了,降回 floating
 //   emit(ev)               — pet:event 转发({kind:'territory', phase, rival})
+//   setPatrolPointer(p)     — 独立巡视指针;p={x,y,pressed}|null(隐藏)
 function createTerritory(hooks) {
   const intervalMs = Math.max(3000, +process.env.OCTOPUS_TERRITORY_INTERVAL || 7000);
   // 可注入的副作用原语(测试用假实现驱动整场驱逐战,不真调 osascript/CGEvent)
@@ -335,7 +336,7 @@ function createTerritory(hooks) {
     return [...new Set([...hooks.rivalNames(), ...extraRivals()])];
   }
 
-  // 物理拖拽前的「用户手上没活」闸门:输入空闲 < 2s 一律不动真鼠标。
+  // 拖拽前的「用户手上没活」闸门:输入空闲 < 2s 一律不动真鼠标。
   async function userHandsOff() {
     const idle = await idleSeconds();
     if (idle >= IDLE_BEFORE_DRAG_S) return true;
@@ -422,8 +423,8 @@ function createTerritory(hooks) {
   }
 
   async function dragRival(rival, targetX, rx, ry, durationMs = 520, onProgress) {
-    // Drag from the visible center of the pet by exactly the window delta. The
-    // Swift helper restores the user's cursor and always posts mouseUp.
+    // 从可见本体拖动一个窗口 delta。Swift 隐藏系统光标，Electron 叠加
+    // 独立的橙色巡视指针；结束/异常时始终 mouseUp 并还原原光标位置。
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
     const sx = rival.x + rival.w * rx;
@@ -432,6 +433,7 @@ function createTerritory(hooks) {
     return new Promise((resolve) => {
       const child = spawn(helper.bin, [sx, sy, ex, sy, durationMs]);
       activeDrags.add(child);
+      if (hooks.setPatrolPointer) hooks.setPatrolPointer({ x: sx, y: sy, pressed: false });
       let stdout = '';
       let stderr = '';
       let lineBuf = '';
@@ -449,7 +451,14 @@ function createTerritory(hooks) {
             continue;
           }
           const m = /^progress\|([0-9.]+)$/.exec(line.trim());
-          if (m && onProgress) onProgress(Math.min(1, Math.max(0, Number(m[1]))));
+          if (m) {
+            const progress = Math.min(1, Math.max(0, Number(m[1])));
+            if (hooks.setPatrolPointer) {
+              const point = interpolateFrame({ x: sx, y: sy }, { x: ex, y: sy }, progress);
+              hooks.setPatrolPointer({ ...point, pressed: true });
+            }
+            if (onProgress) onProgress(progress);
+          }
         }
       });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
@@ -457,6 +466,7 @@ function createTerritory(hooks) {
       child.on('close', (code) => {
         activeDrags.delete(child);
         clearTimeout(killTimer);
+        if (hooks.setPatrolPointer) hooks.setPatrolPointer(null);
         const ok = code === 0 && /ok\|/.test(stdout);
         if (!ok && dragHelperBin && !child._octopusReleased) {
           const origin = lastPointerOrigin ? [lastPointerOrigin.x, lastPointerOrigin.y] : [];
@@ -480,7 +490,7 @@ function createTerritory(hooks) {
     try {
       if (hooks.setPetClickThrough) hooks.setPetClickThrough(true);
       for (const [rx, ry] of points) {
-        // 每个探测点都是一次真实的 180ms 鼠标接管,用户中途动了手就立刻收手
+        // 每个探测点都是一次 180ms 鼠标接管,用户中途动了手就立刻收手。
         if (hooks.shouldAbort() || !(await userHandsOff())) return null;
         const beforeX = current.x;
         const probeX = beforeX + dir * 22;
@@ -515,7 +525,7 @@ function createTerritory(hooks) {
     let maxTravel = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (hooks.shouldAbort()) return 'abort';
-      if (!(await userHandsOff())) return 'abort'; // 用户手上有活,不抢鼠标
+      if (!(await userHandsOff())) return 'abort';
       const wa = hooks.getWorkArea(current);
       const visual = rivalVisualBounds(current);
       const targetX = windowTargetForVisual(current, visual, wa, dir);
@@ -598,8 +608,8 @@ function createTerritory(hooks) {
       if (resist >= 4) {
         if (dragTried) return 'defeat';
         dragTried = true;
-        if (!(await userHandsOff())) return 'abort'; // 物理拖拽档:用户手上有活就撤
-        log('territory', `AXPosition ignored by "${rival.name}" — trying physical mouse drag fallback`);
+        if (!(await userHandsOff())) return 'abort';
+        log('territory', `AXPosition ignored by "${rival.name}" — trying patrol cursor drag fallback`);
         // 透明窗口的几何中心可能没有任何可拖内容。依次探测少量内部候选点，
         // 每次都重扫验证；一旦真实移动立即停止探测。
         const learned = preferredDragPoint.get(rival.name);
@@ -629,14 +639,14 @@ function createTerritory(hooks) {
             if (hooks.setPetClickThrough) hooks.setPetClickThrough(false);
           }
           if (!dragged.ok) {
-            log('territory', 'mouse drag fallback failed:', dragged.error.slice(0, 240));
+            log('territory', 'patrol cursor drag failed:', dragged.error.slice(0, 240));
             return 'defeat';
           }
           await wait(260);
           const rescanned = (await scan()).find((candidate) => candidate.pid === rival.pid);
           if (!rescanned) return 'victory';
           current = rescanned;
-          log('territory', `mouse drag @${rx},${ry}: ${beforeX} -> ${current.x}`);
+          log('territory', `pointer drag @${rx},${ry}: ${beforeX} -> ${current.x}`);
           if (Math.abs(current.x - beforeX) > 8 || atEdge(current, hooks.getWorkArea(current))) {
             moved = true;
             preferredDragPoint.set(rival.name, [rx, ry]);
@@ -647,7 +657,7 @@ function createTerritory(hooks) {
         const currentWa = hooks.getWorkArea(current);
         const currentTarget = nearestEdgeTarget(current, currentWa).targetX;
         const afterDragDist = Math.abs(currentTarget - rival.x);
-        log('territory', `mouse drag result: ${current.x},${current.y}; distance to nearest edge ${afterDragDist}`);
+        log('territory', `pointer drag result: ${current.x},${current.y}; distance to nearest edge ${afterDragDist}`);
         if (atEdge(current, currentWa)) return 'victory';
         if (!moved) return 'defeat';
         resist = 0;
@@ -678,7 +688,7 @@ function createTerritory(hooks) {
       let wa = hooks.getWorkArea(rival);
       let pet = hooks.getPetBounds();
       if (/chatgpt/i.test(rival.name)) {
-        // 这条路要动真鼠标(校准探测),用户手上有活就直接不开战
+        // 透明窗需要短暂物理拖拽校准；用户手上有活就直接不开战。
         if (!(await userHandsOff())) return;
         // 透明窗口没有稳定几何中心：先在小章鱼保持原位时校准真实可拖锚点。
         await raiseRival(rival);
@@ -830,6 +840,7 @@ function createTerritory(hooks) {
       try { child.kill('SIGKILL'); } catch {}
     }
     activeDrags.clear();
+    if (hooks.setPatrolPointer) hooks.setPatrolPointer(null);
     if (!dragHelperBin) return;
     const origin = lastPointerOrigin ? [lastPointerOrigin.x, lastPointerOrigin.y] : [];
     try { spawnSync(dragHelperBin, ['--release', ...origin], { timeout: 1500 }); } catch {}

@@ -47,8 +47,8 @@ if let original {
   print("original|\(original.x)|\(original.y)")
   fflush(stdout)
 }
-// Disconnecting mouse/cursor breaks absolute hit-testing for synthetic events.
-// Hide the visible cursor instead, then restore it without generating an event.
+// The system cursor is hidden while the Electron overlay renders the orange
+// patrol cursor. Always restore the hardware cursor to its original location.
 let cursorDisplay = CGMainDisplayID()
 let hideResult = CGDisplayHideCursor(cursorDisplay)
 defer {
@@ -71,7 +71,6 @@ usleep(80_000)
 
 for i in 1...steps {
   let t = Double(i) / Double(steps)
-  // easeInOutQuad keeps the gesture natural enough for apps that sample drags.
   let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
   let point = CGPoint(x: sx + (ex - sx) * eased, y: sy + (ey - sy) * eased)
   post(.leftMouseDragged, point)

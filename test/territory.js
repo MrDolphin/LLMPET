@@ -232,7 +232,7 @@ check('victory:发现对手 → ontop/spotted/march → 一步步推到屏幕边
   assert.strictEqual(t.busy, false, 'episode 结束后必须放开 busy');
 });
 
-check('defeat:AXPosition 无效+物理拖拽也推不动 → 拔河认怂', async () => {
+check('defeat:AXPosition 无效+软件指针也推不动 → 拔河认怂', async () => {
   const phases = [];
   const { hooks } = mockHooks({
     rivalNames: () => ['Shimeji'],
@@ -251,14 +251,14 @@ check('defeat:AXPosition 无效+物理拖拽也推不动 → 拔河认怂', asyn
   assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'defeat']);
 });
 
-check('用户手上有活(输入空闲<2s)→ 绝不抢鼠标,静默 abort 撤退', async () => {
+check('用户手上有活(输入空闲<2s)→ 软件光标不出手,静默 abort 撤退', async () => {
   const phases = [];
   const { hooks } = mockHooks({
     rivalNames: () => ['Shimeji'],
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
-    userIdleSeconds: async () => 0.2, // 刚动过鼠标
-    dragRival: async () => { throw new Error('不该走到物理拖拽'); },
+    userIdleSeconds: async () => 0.2,
+    dragRival: async () => { throw new Error('用户活跃时不该进入拖拽'); },
     runOsa: fakeOsa({
       presence: () => 'Shimeji|7\n',
       windows: () => 'Shimeji|7|700|300|120|120\n',
