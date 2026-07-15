@@ -133,10 +133,11 @@ check('本体右缘贴边才算完成', () => {
   assert(visualAtEdge({ x: 1300, y: 0, w: 140, h: 140 }, WA));
   assert(!visualAtEdge({ x: 1100, y: 0, w: 140, h: 140 }, WA));
 });
-check('视觉补推身份忽略纵向 7px 晃动，但水平走开会失效', () => {
-  const record = { windowX: 1156, windowY: 357, windowW: 356, windowH: 320 };
+check('视觉补推身份跟随逻辑窗口横纵移动，仅窗口轮廓改变才失效', () => {
+  const record = { targetWindowX: 1156, windowX: 1156, windowY: 357, windowW: 356, windowH: 320 };
   assert(visualShiftMatches(record, { x: 1156, y: 364, w: 356, h: 320 }));
-  assert(!visualShiftMatches(record, { x: 1146, y: 357, w: 356, h: 320 }));
+  assert(visualShiftMatches(record, { x: 900, y: 357, w: 356, h: 320 }));
+  assert(!visualShiftMatches(record, { x: 900, y: 357, w: 320, h: 320 }));
 });
 check('ChatGPT 可见本体几何不再随拖拽锚点漂移', () => {
   const rightTop = chatGPTVisualBounds({ name: 'ChatGPT', pid: 1, x: 800, y: 50, w: 356, h: 320 }, WA, 1);

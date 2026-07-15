@@ -359,9 +359,6 @@ function visualAtEdgeInDirection(visual, wa, dir, slack) {
 
 function visualShiftMatches(record, rival) {
   return !!record
-    && Math.abs(record.windowX - rival.x) <= 3
-    // ChatGPT 的机器人会在透明窗内上下晃动，并把 AX 窗口 y 同步改动几像素；
-    // 水平贴边身份不应因此失效。真正横向走开才交给下一次巡视重新处理。
     && Math.abs(record.windowW - rival.w) <= 3
     && Math.abs(record.windowH - rival.h) <= 3;
 }
@@ -483,10 +480,14 @@ function createTerritory(hooks) {
     if (includeWindowServerShift) {
       const shifted = visualShiftByPid.get(rival.pid);
       if (visualShiftMatches(shifted, rival)) {
-        visual.x += shifted.dx;
+        // helper 会抵消 ChatGPT 自己对逻辑 x 的更新，把合成层窗口持续钉在
+        // targetWindowX。这里也必须用动态差值，不能沿用开战时的旧 dx。
+        visual.x += Number.isFinite(shifted.targetWindowX)
+          ? shifted.targetWindowX - rival.x
+          : shifted.dx;
         visual.y += shifted.dy;
       } else if (shifted) {
-        // 对方自己重新走动后 AppKit 会重建正常 transform；旧补偿不能沿用。
+        // 窗口轮廓改变说明原宠物窗已被替换，旧补偿不能沿用。
         visualShiftByPid.delete(rival.pid);
       }
     }
@@ -597,7 +598,10 @@ function createTerritory(hooks) {
           if (progress && options.onProgress) {
             options.onProgress(Math.min(1, Math.max(0, Number(progress[1]))));
           }
-          if (!settled && /^warped\|/.test(line.trim())) {
+          // warped 只表示动画最后一帧写入成功；旧实现此刻就报 victory，
+          // 但 helper 可能随即因 ChatGPT 自身走动而退出并清除。必须等连续
+          // 4 次维持成功后由 stable 给出真正的完成证明。
+          if (!settled && /^stable\|/.test(line.trim())) {
             settled = true;
             clearTimeout(startTimer);
             resolve({ ok: true });
@@ -612,6 +616,9 @@ function createTerritory(hooks) {
           activeWarps.delete(rival.pid);
           visualShiftByPid.delete(rival.pid);
         }
+        if (settled) {
+          log('territory', `compositor hold ended for "${rival.name}" (code ${code})`);
+        }
         if (!settled) {
           settled = true;
           resolve({ ok: false, error: stderr.trim() || `window warp exited ${code}` });
@@ -625,6 +632,7 @@ function createTerritory(hooks) {
     if (!warped || !warped.ok) return warped;
     visualShiftByPid.set(rival.pid, {
       dx, dy,
+      targetWindowX: rival.x + dx,
       windowX: rival.x, windowY: rival.y,
       windowW: rival.w, windowH: rival.h,
     });
@@ -665,6 +673,7 @@ function createTerritory(hooks) {
     }
     visualShiftByPid.set(rival.pid, {
       dx, dy: 0,
+      targetWindowX: rival.x + dx,
       windowX: rival.x, windowY: rival.y,
       windowW: rival.w, windowH: rival.h,
     });

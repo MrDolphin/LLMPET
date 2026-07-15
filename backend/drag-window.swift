@@ -248,6 +248,16 @@ func matchingPetWindow(pid: Int32, expectedX: Double, expectedY: Double,
   return candidates.min(by: { $0.2 < $1.2 })
 }
 
+func boundsForWindow(_ windowID: CGWindowID, ownedBy pid: Int32) -> CGRect? {
+  let rows = (CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID)
+    as? [[String: Any]]) ?? []
+  guard let info = rows.first(where: {
+    ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID
+      && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+  }), let rawBounds = info[kCGWindowBounds as String] as? NSDictionary else { return nil }
+  return CGRect(dictionaryRepresentation: rawBounds)
+}
+
 func absoluteTransform(_ bounds: CGRect, shiftX: Double, shiftY: Double) -> CGAffineTransform {
   CGAffineTransform(a: 1, b: 0, c: 0, d: 1,
     tx: -bounds.origin.x - shiftX, ty: -bounds.origin.y - shiftY)
@@ -502,20 +512,36 @@ if CommandLine.arguments.count >= 9
     print("warped|\(windowID)|\(initialBounds.origin.x)|\(initialBounds.origin.y)|\(shiftX)|\(shiftY)")
     fflush(stdout)
 
-    // Warp 不会被 ChatGPT 的 transform 动画覆盖。低频观察逻辑 frame：只要
-    // 它仍停在同一水平位置，就随 y 更新网格；水平走开/关闭/父进程退出即清除。
+    // ChatGPT 的桌宠会自行更新 AX/WindowServer 的逻辑 x。之前把这视为“用户
+    // 拖走了”，导致刚输出 warped 就清除网格，JS 却已经误报 victory。这里把
+    // 第一次抵达的合成层 x 当成固定边界：逻辑窗自己走动时动态修正 shift，
+    // 可见桌宠仍留在边缘。只有窗口/父进程消失，或用户在桌宠上按键接管时清除。
     let parent = getppid()
-    var bounds = initialBounds
+    let pinnedWindowX = initialBounds.origin.x + shiftX
+    var stableTicks = 0
+    var announcedStable = false
     while parent != 1 && getppid() == parent {
       usleep(100_000)
-      guard let (currentID, currentBounds, _) = matchingPetWindow(
-        pid: pid, expectedX: expectedX, expectedY: bounds.origin.y,
-        expectedW: expectedW, expectedH: expectedH),
-        currentID == windowID,
-        abs(currentBounds.origin.x - expectedX) <= 3 else { break }
-      bounds = currentBounds
-      result = setWindowWarp(cid, windowID, bounds, shiftX: shiftX, shiftY: shiftY)
+      guard let currentBounds = boundsForWindow(windowID, ownedBy: pid) else { break }
+      let liveShiftX = pinnedWindowX - currentBounds.origin.x
+      let warpedBounds = CGRect(
+        x: pinnedWindowX, y: currentBounds.origin.y + shiftY,
+        width: currentBounds.width, height: currentBounds.height)
+      if physicalMouseButtonIsDown(), let cursor = CGEvent(source: nil)?.location,
+         warpedBounds.contains(cursor) {
+        print("released|user=1")
+        fflush(stdout)
+        break
+      }
+      result = setWindowWarp(cid, windowID, currentBounds,
+        shiftX: liveShiftX, shiftY: shiftY)
       if result != .success { break }
+      stableTicks += 1
+      if !announcedStable && stableTicks >= 4 {
+        announcedStable = true
+        print("stable|\(windowID)|\(pinnedWindowX)|\(currentBounds.origin.y + shiftY)")
+        fflush(stdout)
+      }
     }
     _ = CGSSetWindowWarp(cid, windowID, 0, 0, nil)
     print("unwarped|\(windowID)|\(result.rawValue)")
