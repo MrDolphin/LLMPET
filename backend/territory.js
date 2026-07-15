@@ -23,6 +23,7 @@ const { execFile, spawn, spawnSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
 const { log } = require('./log');
 
 // 已知桌宠的进程名特征(System Events 的 name contains 匹配,大小写不敏感)。
@@ -375,51 +376,47 @@ function interpolateFrame(from, to, progress) {
 
 function parseDragHelperResult(stdout, code) {
   const out = String(stdout || '');
-  if (code !== 0) return { ok: false, error: `drag helper exited ${code}` };
-  if (!/^ok\|hide=0\|associate=0\|beforeWarp=1$/m.test(out)
-      || !/^isolation\|beforeWarp=1\|associate=0$/m.test(out)) {
-    return { ok: false, error: 'drag helper did not isolate hardware before warp' };
-  }
-  if (!/^restore\|warp=0\|associate=0\|show=0$/m.test(out)
-      || !/^transport\|warp=0$/m.test(out)) {
-    return { ok: false, error: 'drag helper did not restore cursor transport' };
-  }
-  if (!/^button\|left=0$/m.test(out)) {
-    return { ok: false, error: 'drag helper did not confirm mouse button release' };
+  const interrupted = /^interrupted\|user=1$/m.test(out);
+  if (code !== 0) return { ok: false, interrupted, error: `drag helper exited ${code}` };
+  if (!/^interrupted\|user=0$/m.test(out)
+      || !/^transport\|targeted=1\|pid=\d+\|window=\d+\|nsEvent=1\|windowLocation=1\|slevent=1\|eventMask=1\|warp=0\|associate=0\|hide=0$/m.test(out)
+      || !/^release\|targeted=1$/m.test(out)
+      || !/^ok\|targeted=1\|userCursorFree=1$/m.test(out)) {
+    return { ok: false, interrupted, error: 'drag helper did not prove targeted cursor-free transport' };
   }
   if (!/^overlay\|native=1\|opaque=0\|alpha=0\|shadow=0\|ignoresMouse=1\|sharing=1\|cornerAlpha=0\|serverBounds=1\|serverSharing=1$/m.test(out)) {
     return { ok: false, error: 'drag helper did not confirm a clear native pointer overlay' };
   }
   const m = /^cursor\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)$/m.exec(out);
-  if (!m) return { ok: false, error: 'drag helper omitted restored cursor coordinates' };
+  if (!m) return { ok: false, error: 'drag helper omitted physical cursor observations' };
   const [ox, oy, rx, ry] = m.slice(1).map(Number);
-  const drift = Math.hypot(rx - ox, ry - oy);
-  if (!Number.isFinite(drift) || drift > 2) {
-    return { ok: false, error: `cursor restore drifted ${Number.isFinite(drift) ? drift.toFixed(2) : 'unknown'}px` };
-  }
-  return { ok: true, cursorDrift: drift };
+  const cursorTravel = Math.hypot(rx - ox, ry - oy);
+  if (!Number.isFinite(cursorTravel)) return { ok: false, error: 'invalid physical cursor observations' };
+  // Movement is allowed: it means the user used the real pointer concurrently.
+  return { ok: true, interrupted: false, cursorTravel };
 }
 
 function parseProbeHelperResult(stdout, code, points) {
   const out = String(stdout || '');
-  if (code !== 0) return { ok: false, error: `probe helper exited ${code}` };
-  if (!/^isolation\|beforeWarp=1\|associate=0$/m.test(out)
-      || !/^restore\|warp=0\|associate=0\|show=0$/m.test(out)
-      || !/^button\|left=0$/m.test(out)
+  const interrupted = /^interrupted\|user=1$/m.test(out);
+  if (code !== 0) return { ok: false, interrupted, error: `probe helper exited ${code}` };
+  if (!/^interrupted\|user=0$/m.test(out)
+      || !/^transport\|targeted=1\|pid=\d+\|window=\d+\|nsEvent=1\|windowLocation=1\|slevent=1\|eventMask=1\|warp=0\|associate=0\|hide=0$/m.test(out)
       || !/^overlay\|native=1\|opaque=0\|alpha=0\|shadow=0\|ignoresMouse=1\|sharing=1\|cornerAlpha=0\|serverBounds=1\|serverSharing=1$/m.test(out)) {
-    return { ok: false, error: 'probe helper did not isolate before hover and restore cursor' };
+    return { ok: false, interrupted, error: 'probe helper did not prove targeted cursor-free transport' };
   }
   const cursor = /^cursor\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)\|(-?[0-9.]+)$/m.exec(out);
   const probe = /^probe\|(-?\d+)$/m.exec(out);
   if (!cursor || !probe) return { ok: false, error: 'probe helper output incomplete' };
   const [ox, oy, rx, ry] = cursor.slice(1).map(Number);
-  const drift = Math.hypot(rx - ox, ry - oy);
+  const cursorTravel = Math.hypot(rx - ox, ry - oy);
   const index = Number(probe[1]);
-  if (!Number.isFinite(drift) || drift > 2 || !Number.isInteger(index)
+  if (!Number.isFinite(cursorTravel) || !Number.isInteger(index)
       || index < -1 || index >= points.length) {
     return { ok: false, error: 'probe helper returned invalid cursor or candidate data' };
   }
-  return { ok: true, index, point: index >= 0 ? points[index] : null, cursorDrift: drift };
+  return { ok: true, interrupted: false, index,
+    point: index >= 0 ? points[index] : null, cursorTravel };
 }
 
 // 宠物站到对方身侧的 x(与对方保持 26px 重叠,看起来贴身顶着)
@@ -458,13 +455,13 @@ function createTerritory(hooks) {
   let checking = false;   // osascript 扫描尚未结束时禁止定时器/按钮重复开局
   let dragHelperPromise = null;
   let dragHelperBin = null;
-  let lastPointerOrigin = null;
   const activeDrags = new Set();
   const activeWarps = new Map();
   const preferredDragPoint = new Map(); // 普通桌宠按名称，ChatGPT 按 pid 缓存拖点候选
   const visualShiftByPid = new Map(); // WindowServer 视觉偏移；AXPosition 不会反映它
   let lastOwnDragAt = 0;
   let manualDragAuthorized = false; // 点击“巡视”本身不能被 HID idle 闸门当成用户干扰
+  let episodeInterrupted = false; // helper 检测到物理按键后，整场立即让用户优先
 
   function dragPointKey(rival) {
     return /chatgpt/i.test(rival.name) ? `${rival.name}:${rival.pid}` : rival.name;
@@ -514,6 +511,10 @@ function createTerritory(hooks) {
   // 自动巡视仍避开用户正在交互的时刻；底层已经不再移动/隐藏真鼠标，
   // 这个闸门只用于避免同时操作同一个目标应用，而不是保护系统光标。
   async function userHandsOff() {
+    if (episodeInterrupted) {
+      log('territory', 'user intervened during targeted patrol input — abort');
+      return false;
+    }
     if (manualDragAuthorized) return true;
     const idle = await idleSeconds();
     if (idle >= IDLE_BEFORE_DRAG_S) return true;
@@ -528,6 +529,7 @@ function createTerritory(hooks) {
 
   async function performDrag(...args) {
     const result = await drag(...args);
+    if (result && result.interrupted) episodeInterrupted = true;
     if (result && result.ok) lastOwnDragAt = Date.now();
     return result;
   }
@@ -555,7 +557,7 @@ function createTerritory(hooks) {
     });
   }
 
-  async function warpRivalVisual(rival, dx, dy = 0) {
+  async function warpRivalVisual(rival, dx, dy = 0, options = {}) {
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
     const previous = activeWarps.get(rival.pid);
@@ -563,27 +565,44 @@ function createTerritory(hooks) {
       try { previous.child.kill('SIGKILL'); } catch {}
     }
     return new Promise((resolve) => {
-      const child = spawn(helper.bin, [
+      const durationMs = Math.max(0, Math.min(900, Number(options.durationMs) || 220));
+      const args = [
         '--warp-window', rival.pid,
         rival.x, rival.y, rival.w, rival.h,
-        dx, dy, 220,
-      ].map(String));
+        dx, dy, durationMs,
+      ];
+      if (options.pointerStart) {
+        args.push(options.pointerStart.x, options.pointerStart.y);
+      }
+      const child = spawn(helper.bin, args.map(String));
       const entry = { child, rival: { ...rival }, dx, dy };
       activeWarps.set(rival.pid, entry);
       let settled = false;
       let stderr = '';
+      let lineBuf = '';
       const startTimer = setTimeout(() => {
         if (!settled) {
           settled = true;
           try { child.kill('SIGKILL'); } catch {}
           resolve({ ok: false, error: 'window warp startup timed out' });
         }
-      }, 1800);
+      }, Math.max(1800, durationMs + 1400));
       child.stdout.on('data', (chunk) => {
-        if (settled || !/^warped\|/m.test(String(chunk))) return;
-        settled = true;
-        clearTimeout(startTimer);
-        resolve({ ok: true });
+        const text = String(chunk);
+        lineBuf += text;
+        const lines = lineBuf.split('\n');
+        lineBuf = lines.pop() || '';
+        for (const line of lines) {
+          const progress = /^progress\|([0-9.]+)$/.exec(line.trim());
+          if (progress && options.onProgress) {
+            options.onProgress(Math.min(1, Math.max(0, Number(progress[1]))));
+          }
+          if (!settled && /^warped\|/.test(line.trim())) {
+            settled = true;
+            clearTimeout(startTimer);
+            resolve({ ok: true });
+          }
+        }
       });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
       child.on('error', (err) => { stderr += String(err || ''); });
@@ -610,6 +629,47 @@ function createTerritory(hooks) {
       windowW: rival.w, windowH: rival.h,
     });
     return { ok: true };
+  }
+
+  async function compositorPush(rival, dir, petB) {
+    if (!(await userHandsOff())) return 'abort';
+    const wa = hooks.getWorkArea(rival);
+    const visual = rivalVisualBounds(rival, false, dir);
+    const targetX = windowTargetForVisual(rival, visual, wa, dir);
+    const dx = targetX - rival.x;
+    if (Math.abs(dx) <= 2) return 'victory';
+
+    const finalVisualX = visual.x + dx;
+    const finalPetX = Math.min(Math.max(
+      standX(finalVisualX, visual.w, dir, petB.width),
+      wa.x - petB.width + 60), wa.x + wa.width - 60);
+    const startPet = hooks.getPetBounds();
+    let syncFrames = 0;
+    const warped = await warpVisual(rival, dx, 0, {
+      durationMs: 720,
+      pointerStart: {
+        x: visual.x + visual.w / 2,
+        y: visual.y + visual.h / 2,
+      },
+      onProgress(progress) {
+        if (!hooks.setPetFrame) return;
+        syncFrames++;
+        const frame = interpolateFrame(startPet, { x: finalPetX, y: petB.y }, progress);
+        hooks.setPetFrame(frame.x, frame.y);
+      },
+    });
+    if (hooks.endPetFrames) hooks.endPetFrames();
+    if (!warped || !warped.ok) {
+      log('territory', 'compositor push failed:', String(warped && warped.error || '').slice(0, 240));
+      return /interrupted|exited 6/i.test(String(warped && warped.error || '')) ? 'abort' : 'defeat';
+    }
+    visualShiftByPid.set(rival.pid, {
+      dx, dy: 0,
+      windowX: rival.x, windowY: rival.y,
+      windowW: rival.w, windowH: rival.h,
+    });
+    log('territory', `compositor push: ${rival.x} + ${dx.toFixed(1)}px; sync frames=${syncFrames}`);
+    return 'victory';
   }
 
   async function presence() {
@@ -696,16 +756,23 @@ function createTerritory(hooks) {
       dragHelperBin = packaged;
       return dragHelperPromise;
     } catch {}
-    // 开发运行:产物用固定文件名 + 源码 mtime 做缓存,不带 pid 后缀——
-    // 否则每次启动都留一个孤儿二进制在 tmpdir,且每次都重付一遍 swiftc。
-    const bin = path.join(os.tmpdir(), 'octopus-drag-window');
+    // 按源码内容缓存，而不是按 mtime。应用打包/解包会重写或保留时间戳，
+    // 单纯比较 mtime 会让新版 JS 调到旧版 Swift（参数协议都可能不同）。
+    // 内容哈希既避免每次启动重编译，也保证协议变化后一定换新二进制。
+    let sourceHash;
     try {
-      if (fs.statSync(bin).mtimeMs >= fs.statSync(DRAG_HELPER).mtimeMs) {
-        fs.accessSync(bin, fs.constants.X_OK);
-        dragHelperBin = bin;
-        dragHelperPromise = Promise.resolve({ ok: true, bin });
-        return dragHelperPromise;
-      }
+      sourceHash = crypto.createHash('sha256')
+        .update(fs.readFileSync(DRAG_HELPER))
+        .digest('hex').slice(0, 16);
+    } catch (err) {
+      return { ok: false, error: String(err || 'could not hash drag helper source') };
+    }
+    const bin = path.join(os.tmpdir(), `octopus-drag-window-${sourceHash}`);
+    try {
+      fs.accessSync(bin, fs.constants.X_OK);
+      dragHelperBin = bin;
+      dragHelperPromise = Promise.resolve({ ok: true, bin });
+      return dragHelperPromise;
     } catch {}
     dragHelperPromise = new Promise((resolve) => {
       execFile('/usr/bin/swiftc', [
@@ -735,21 +802,13 @@ function createTerritory(hooks) {
         ...points.flat(),
       ].map(String);
       const child = spawn(helper.bin, args);
+      child._octopusTarget = { pid: rival.pid, x: rival.x, y: rival.y };
       activeDrags.add(child);
       let stdout = '';
       let stderr = '';
-      let lineBuf = '';
       const killTimer = setTimeout(() => child.kill('SIGKILL'), 4000);
       child.stdout.on('data', (chunk) => {
-        const text = String(chunk);
-        stdout += text;
-        lineBuf += text;
-        const lines = lineBuf.split('\n');
-        lineBuf = lines.pop() || '';
-        for (const line of lines) {
-          const origin = /^original\|(-?[0-9.]+)\|(-?[0-9.]+)$/.exec(line.trim());
-          if (origin) lastPointerOrigin = { x: Number(origin[1]), y: Number(origin[2]) };
-        }
+        stdout += String(chunk);
       });
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
       child.on('error', (err) => { stderr += String(err || ''); });
@@ -757,10 +816,7 @@ function createTerritory(hooks) {
         activeDrags.delete(child);
         clearTimeout(killTimer);
         const parsed = parseProbeHelperResult(stdout, code, points);
-        if (!parsed.ok && dragHelperBin) {
-          const origin = lastPointerOrigin ? [lastPointerOrigin.x, lastPointerOrigin.y] : [];
-          spawnSync(dragHelperBin, ['--release', ...origin], { timeout: 1500 });
-        }
+        if (parsed.interrupted) episodeInterrupted = true;
         if (parsed.ok) lastOwnDragAt = Date.now();
         resolve(parsed.ok ? parsed : {
           ...parsed,
@@ -771,8 +827,8 @@ function createTerritory(hooks) {
   }
 
   async function dragRival(rival, targetX, rx, ry, durationMs = 520, onProgress) {
-    // Swift 在硬件隔离期间发送全局 HID 事件，并用原生透明 NSPanel 绘制
-    // 巡视指针。Electron 不再创建指针 BrowserWindow，避免白色 backing surface。
+    // Swift 把事件定向投递给目标 PID + WindowServer window；真鼠标始终
+    // 保持显示和关联。原生透明 NSPanel 只负责可视化独立的巡视指针。
     const helper = await ensureDragHelper();
     if (!helper.ok) return helper;
     const sx = rival.x + rival.w * rx;
@@ -780,8 +836,10 @@ function createTerritory(hooks) {
     const ex = sx + (targetX - rival.x);
     return new Promise((resolve) => {
       const child = spawn(helper.bin, [
-        '--drag-pid', rival.pid, sx, sy, ex, sy, durationMs,
+        '--drag-pid', rival.pid, rival.x, rival.y, rival.w, rival.h,
+        sx, sy, ex, sy, durationMs,
       ].map(String));
+      child._octopusTarget = { pid: rival.pid, x: sx, y: sy };
       activeDrags.add(child);
       let stdout = '';
       let stderr = '';
@@ -794,11 +852,6 @@ function createTerritory(hooks) {
         const lines = lineBuf.split('\n');
         lineBuf = lines.pop() || '';
         for (const line of lines) {
-          const origin = /^original\|(-?[0-9.]+)\|(-?[0-9.]+)$/.exec(line.trim());
-          if (origin) {
-            lastPointerOrigin = { x: Number(origin[1]), y: Number(origin[2]) };
-            continue;
-          }
           const m = /^progress\|([0-9.]+)$/.exec(line.trim());
           if (m) {
             const progress = Math.min(1, Math.max(0, Number(m[1])));
@@ -813,13 +866,14 @@ function createTerritory(hooks) {
         clearTimeout(killTimer);
         const parsed = parseDragHelperResult(stdout, code);
         if (!parsed.ok && dragHelperBin && !child._octopusReleased) {
-          const origin = lastPointerOrigin ? [lastPointerOrigin.x, lastPointerOrigin.y] : [];
-          spawnSync(dragHelperBin, ['--release', ...origin], { timeout: 1500 });
+          spawnSync(dragHelperBin, ['--release-pid', rival.pid, sx, sy], { timeout: 1500 });
         }
+        if (parsed.interrupted) episodeInterrupted = true;
         resolve({
           ok: parsed.ok,
+          interrupted: !!parsed.interrupted,
           error: [stderr.trim(), parsed.ok ? '' : parsed.error].filter(Boolean).join('; '),
-          cursorDrift: parsed.cursorDrift,
+          cursorTravel: parsed.cursorTravel,
         });
       });
     });
@@ -851,13 +905,16 @@ function createTerritory(hooks) {
           log('territory', 'safe drag-point probe failed:', String(probed.error || '').slice(0, 240));
           return null;
         }
-        if (!probed.point) {
-          log('territory', 'safe drag-point probe found no mascot hit');
-          return null;
+        if (probed.point) {
+          lastOwnDragAt = Date.now();
+          points = [probed.point];
+          log('territory', `safe drag-point probe selected @${probed.point[0]},${probed.point[1]}`);
+        } else {
+          // 定向事件不改变 WindowServer 的全局 hover 命中状态；因此 AX
+          // hit-test 可能仍返回穿透后的下层窗口。直接用四象限候选做 22px
+          // 小拖并真实复扫，才是定向传输下可靠的命中验证。
+          log('territory', 'targeted probe has no global AX hit — calibrating candidates directly');
         }
-        lastOwnDragAt = Date.now();
-        points = [probed.point];
-        log('territory', `safe drag-point probe selected @${probed.point[0]},${probed.point[1]}`);
       }
       for (const [rx, ry] of points) {
         // 每个探测点都是一次 180ms 定向事件；用户中途开始交互就收手。
@@ -965,7 +1022,7 @@ function createTerritory(hooks) {
         if (hooks.setPetClickThrough) hooks.setPetClickThrough(false);
       }
       log('territory', `sync frames=${syncFrames} duration=${Date.now() - syncStarted}ms final=${finalProgress.toFixed(3)}`);
-      if (!dragged.ok) return 'defeat';
+      if (!dragged.ok) return dragged.interrupted ? 'abort' : 'defeat';
       await wait(260);
       const observed = await observeRival(rival.pid, 3);
       if (!observed.ok) {
@@ -1067,7 +1124,7 @@ function createTerritory(hooks) {
           }
           if (!dragged.ok) {
             log('territory', 'patrol cursor drag failed:', dragged.error.slice(0, 240));
-            return 'defeat';
+            return dragged.interrupted ? 'abort' : 'defeat';
           }
           await wait(260);
           const observed = await observeRival(rival.pid, 3);
@@ -1106,6 +1163,7 @@ function createTerritory(hooks) {
 
   async function runEpisode(rival) {
     episode = true;
+    episodeInterrupted = false;
     // home 必须在 try 里取:getPetBounds 若抛异常(petWin 销毁瞬间),episode
     // 标志已置位,不进 finally 的话 territory 会永久卡在 busy。
     let home = null;
@@ -1126,32 +1184,10 @@ function createTerritory(hooks) {
         const normalized = await clearVisual(rival);
         if (normalized && normalized.ok) visualShiftByPid.delete(rival.pid);
         else log('territory', 'visual transform reset skipped:', String(normalized && normalized.error || '').slice(0, 200));
-        const frameClamped = atEdge(rival, wa, 3);
-        const needsAnchor = !getPreferredDragPoint(rival);
-        if (!frameClamped || needsAnchor) {
-          if (!(await userHandsOff())) return;
-          if (!(await raiseRival(rival))) {
-            outcome = 'defeat';
-            hooks.emit({ kind: 'territory', phase: outcome, rival: rival.name, ts: Date.now() });
-            return;
-          }
-          const roughDir = frameClamped
-            ? (atEdgeInDirection(rival, wa, 1, 3) ? -1 : 1)
-            : (pet.x + pet.width / 2 <= rival.x + rival.w / 2 ? 1 : -1);
-          const calibrated = await calibrateDragPoint(rival, roughDir);
-          if (!calibrated) {
-            if (hooks.shouldAbort() || !(await userHandsOff())) return;
-            outcome = 'defeat';
-            log('territory', `could not calibrate draggable area for "${rival.name}"`);
-            hooks.emit({ kind: 'territory', phase: outcome, rival: rival.name, ts: Date.now() });
-            return;
-          }
-          rival = calibrated;
-          wa = hooks.getWorkArea(rival);
-          pet = hooks.getPetBounds();
-        } else {
-          log('territory', `transparent frame already clamped at ${rival.x},${rival.y} — visual finish only`);
-        }
+        // ChatGPT/Codex 的独立虚拟输入流属于系统 Computer Use 服务，普通
+        // 应用的 postToPid 即使带 windowNumber 也不会建立 Electron 拖拽捕获。
+        // 因此不再用四个候选点反复“试点”，而是直接由 WindowServer 合成层
+        // 做可见窗口位移；软件指针负责呈现动作，用户真鼠标全程自由。
       }
       const visualRival = rivalVisualBounds(rival);
       const { dir } = edgeAwayFromPet(visualRival, wa, pet);
@@ -1175,7 +1211,7 @@ function createTerritory(hooks) {
       if (hooks.shouldAbort()) return;
 
       outcome = /chatgpt/i.test(rival.name)
-        ? await physicalPush({ ...rival }, dir, { ...pet, x: sx, y: sy })
+        ? await compositorPush({ ...rival }, dir, { ...pet, x: sx, y: sy })
         : await pushLoop({ ...rival }, dir, targetX, wa, { ...pet, x: sx, y: sy });
       if (outcome === 'victory' || outcome === 'partial' || outcome === 'defeat') {
         log('territory', `episode vs "${rival.name}": ${outcome}`);
@@ -1190,6 +1226,7 @@ function createTerritory(hooks) {
       if (outcome === 'abort') hooks.emit({ kind: 'territory', phase: 'abort', rival: rival.name, ts: Date.now() });
       try { if (home) await hooks.tweenPetTo(home.x, home.y, 1600); } catch {}
       episode = false;
+      episodeInterrupted = false;
     }
   }
 
@@ -1284,10 +1321,17 @@ function createTerritory(hooks) {
     log('territory', `watching for rivals every ${intervalMs}ms`);
   }
   function emergencyRelease() {
-    const hadActiveDrag = activeDrags.size > 0;
     for (const child of activeDrags) {
       child._octopusReleased = true;
+      const target = child._octopusTarget;
       try { child.kill('SIGKILL'); } catch {}
+      if (dragHelperBin && target) {
+        try {
+          spawnSync(dragHelperBin,
+            ['--release-pid', target.pid, target.x, target.y].map(String),
+            { timeout: 1500 });
+        } catch {}
+      }
     }
     activeDrags.clear();
     for (const [pid, entry] of activeWarps) {
@@ -1305,9 +1349,6 @@ function createTerritory(hooks) {
     }
     activeWarps.clear();
     visualShiftByPid.clear();
-    if (!dragHelperBin || !hadActiveDrag) return;
-    const origin = lastPointerOrigin ? [lastPointerOrigin.x, lastPointerOrigin.y] : [];
-    try { spawnSync(dragHelperBin, ['--release', ...origin], { timeout: 1500 }); } catch {}
   }
   function stop() {
     if (timer) { clearInterval(timer); timer = null; }
