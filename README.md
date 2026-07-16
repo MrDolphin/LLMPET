@@ -63,7 +63,7 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 - 事件映射：`user_message→思考`、`exec_command/apply_patch→干活`、`task_complete→完成庆祝+💬`、`turn_aborted→中断徽标`、`token_count→上下文%`；guardian / auto-review 等 subagent 内部线程自动过滤。
 - **额度**：Codex 没有逐 token 价目，面板显示套餐窗口用量（5h 主窗口 + 周窗口 %，来自 rollout 的 `rate_limits`）。
 - **两种形态**（托盘 → 设置 → 分身）：
-  - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 绿终端块）；
+  - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 蓝终端块）；
   - **双宠**：Claude / Codex 各一只，形象、位置独立可拖，各自戴名牌，事件各归各的宠。
 - `OCTOPUS_NO_CODEX=1` 关闭 Codex 监听；`OCTOPUS_CODEX_DIR=<dir>` 指向假目录做开发验证。
 

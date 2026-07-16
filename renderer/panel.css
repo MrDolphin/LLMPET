@@ -60,7 +60,7 @@ html, body {
 .bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; }
 .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #e8a06d, #d97757); border-radius: 6px; transition: width 0.4s ease; }
 .bar-fill.warn { background: linear-gradient(90deg, #e8896b, #c9472b); }
-.bar-fill.codex { background: linear-gradient(90deg, #35c99e, #10a37f); }
+.bar-fill.codex { background: linear-gradient(90deg, #6aa9ff, #3b82f6); }
 .bar-fill.codex.warn { background: linear-gradient(90deg, #e8896b, #c9472b); }
 
 /* 区块 */
