@@ -194,4 +194,38 @@ check('坏 JSON 行 / 空目录 / 目录不存在都不炸', () => {
   w2.tick(); // 不抛即可
 });
 
+console.log('[C5] 长寿会话与超长 meta（实测踩坑回归）');
+check('几天前日期目录里的活跃文件：启动即入库，之后每轮都能跟进增量', () => {
+  const { root } = mkSessions();
+  // 会话 5 天前开始 → rollout 在 5 天前的日期目录里，但 mtime 是现在（还在写）
+  const d = new Date(Date.now() - 5 * 86400000);
+  const oldDir = path.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0'));
+  fs.mkdirSync(oldDir, { recursive: true });
+  const fp = path.join(oldDir, `rollout-old-${UUID_A}.jsonl`);
+  fs.writeFileSync(fp, meta(UUID_A) + line({ type: 'event_msg', payload: { type: 'user_message', message: '几天前开的长寿会话' } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick(); // 启动轮 = 全量扫描
+  assert.strictEqual(core.seeds.length, 1, '旧日期目录的活跃文件应在启动时入库');
+  assert.strictEqual(core.seeds[0].sessionTitle, '几天前开的长寿会话');
+  fs.appendFileSync(fp, line({ type: 'event_msg', payload: { type: 'task_started' } }));
+  w.tick(); // 第二轮不是全量轮：tracker 直连 stat 也必须泵到
+  assert.ok(core.updates.some((u) => u.event === 'TaskStarted'), '非全量轮也要跟进旧目录文件的增量');
+});
+check('35KB+ 超长 session_meta 行完整解析（cwd / subagent 判定不丢）', () => {
+  const { root, dir } = mkSessions();
+  const fp = path.join(dir, `rollout-2026-07-11T06-00-00-${UUID_B}.jsonl`);
+  const big = {
+    type: 'session_meta',
+    payload: { id: UUID_B, session_id: UUID_B, cwd: '/tmp/bigmeta', originator: 'Codex Desktop', thread_source: 'user', base_instructions: { text: 'x'.repeat(35000) } },
+  };
+  fs.writeFileSync(fp, JSON.stringify(big) + '\n'
+    + line({ type: 'event_msg', payload: { type: 'user_message', message: '超长 meta 也要认识我' } }));
+  const core = fakeCore();
+  const w = createCodexWatch({ core, sessionsDir: root, pollMs: 999999 });
+  w.tick();
+  assert.strictEqual(core.seeds.length, 1);
+  assert.strictEqual(core.seeds[0].cwd, '/tmp/bigmeta', 'meta 截断会丢 cwd');
+});
+
 process.exit(failures ? 1 : 0);

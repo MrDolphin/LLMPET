@@ -39,7 +39,9 @@ const POLL_MS = 2500;
 const BACKFILL_MAX_AGE_MS = 30 * 60 * 1000; // 与 core 的 backfill 窗口对齐
 const IDLE_UNTRACK_MS = 60 * 60 * 1000;     // 文件超过 1h 没动 → 不再跟踪（再动会重新发现）
 const MAX_READ_PER_TICK = 512 * 1024;       // 单文件单轮读取上限
-const HEAD_PROBE_BYTES = 16 * 1024;         // session_meta 在第一行（含 base_instructions 可能较长）
+const HOT_DAYS = 3;                         // 每轮都扫的近几天日期目录（新会话都落这里）
+const FULL_SWEEP_TICKS = 12;                // 每 ~30s 全量扫一次所有日期目录（见 sweepAllRecent）
+const FIRST_LINE_MAX = 1024 * 1024;         // session_meta 行封顶（实测带 base_instructions 可达 35KB+）
 const TAIL_PROBE_BYTES = 128 * 1024;
 const ASSISTANT_MAX = 2400;                 // 与 server.js 的 ASSISTANT_LAST_OUTPUT_MAX 一致
 
@@ -79,6 +81,25 @@ function parseLine(line) {
   const t = line.trim();
   if (!t) return null;
   try { return JSON.parse(t); } catch { return null; }
+}
+
+// 读第一行（session_meta）。带超长 base_instructions 的 meta 行实测可达 35KB+，
+// 固定小探针会把它截断导致解析失败（cwd/subagent 判定全丢）——分块读到第一个
+// 换行为止，FIRST_LINE_MAX 封顶。
+function readFirstLine(fp) {
+  const chunkSize = 64 * 1024;
+  let buf = Buffer.alloc(0);
+  let pos = 0;
+  while (pos < FIRST_LINE_MAX) {
+    const chunk = readBytes(fp, pos, chunkSize);
+    if (!chunk || !chunk.length) break;
+    const nl = chunk.indexOf(0x0a);
+    if (nl !== -1) return Buffer.concat([buf, chunk.slice(0, nl)]).toString('utf8');
+    buf = Buffer.concat([buf, chunk]);
+    pos += chunk.length;
+    if (chunk.length < chunkSize) break; // EOF 且没有换行
+  }
+  return buf.length ? buf.toString('utf8') : null;
 }
 
 function clipAssistant(s) {
@@ -132,13 +153,14 @@ function createCodexWatch(deps) {
   const trackers = new Map();
   let timer = null;
   let booted = false;      // 首轮扫描 = backfill；之后的新文件才是「新会话」
+  let tickCount = 0;       // 全量扫描节拍（FULL_SWEEP_TICKS 轮一次）
   let missingLogged = false;
   let rateLimits = null;
 
-  // 最近 2 天的日期目录（跨午夜时昨天的会话还在活跃）
+  // 热扫描：最近 HOT_DAYS 天的日期目录（新会话都创建在「今天」的目录里）
   function dayDirs() {
     const dirs = [];
-    for (const back of [0, 1]) {
+    for (let back = 0; back < HOT_DAYS; back++) {
       const d = new Date(Date.now() - back * 86400000);
       dirs.push(path.join(
         sessionsDir,
@@ -150,6 +172,13 @@ function createCodexWatch(deps) {
     return dirs;
   }
 
+  function statEntry(fp) {
+    try {
+      const st = fs.statSync(fp);
+      return { fp, size: st.size, mtimeMs: st.mtimeMs };
+    } catch { return null; }
+  }
+
   function listRolloutFiles() {
     const out = [];
     for (const dir of dayDirs()) {
@@ -157,10 +186,40 @@ function createCodexWatch(deps) {
       try { names = fs.readdirSync(dir); } catch { continue; }
       for (const n of names) {
         if (!n.endsWith('.jsonl')) continue;
-        const fp = path.join(dir, n);
-        let st;
-        try { st = fs.statSync(fp); } catch { continue; }
-        out.push({ fp, size: st.size, mtimeMs: st.mtimeMs });
+        const e = statEntry(path.join(dir, n));
+        if (e) out.push(e);
+      }
+    }
+    return out;
+  }
+
+  // 全量扫描：递归所有 年/月/日 目录，只收 1h 内仍在写的文件。
+  // rollout 永远留在「会话开始日」的目录里——ChatGPT Desktop 一个对话连聊几天，
+  // 文件还在 5 天前的目录里被追加（实测踩坑）。只扫今天/昨天永远看不见它，
+  // 所以启动第一轮 + 之后每 FULL_SWEEP_TICKS 轮做一次全量兜底。
+  function sweepAllRecent() {
+    const out = [];
+    const now = Date.now();
+    let years;
+    try { years = fs.readdirSync(sessionsDir); } catch { return out; }
+    for (const y of years) {
+      if (!/^\d{4}$/.test(y)) continue;
+      let months;
+      try { months = fs.readdirSync(path.join(sessionsDir, y)); } catch { continue; }
+      for (const m of months) {
+        if (!/^\d{2}$/.test(m)) continue;
+        let days;
+        try { days = fs.readdirSync(path.join(sessionsDir, y, m)); } catch { continue; }
+        for (const d of days) {
+          if (!/^\d{2}$/.test(d)) continue;
+          let names;
+          try { names = fs.readdirSync(path.join(sessionsDir, y, m, d)); } catch { continue; }
+          for (const n of names) {
+            if (!n.endsWith('.jsonl')) continue;
+            const e = statEntry(path.join(sessionsDir, y, m, d, n));
+            if (e && now - e.mtimeMs <= IDLE_UNTRACK_MS) out.push(e);
+          }
+        }
       }
     }
     return out;
@@ -309,10 +368,9 @@ function createCodexWatch(deps) {
 
   // ── 启动 backfill：头部读 meta、尾部读近况，静默入库 ─────────────────────────
   function backfill(t, size, mtimeMs) {
-    const head = readBytes(t.fp, 0, Math.min(HEAD_PROBE_BYTES, size));
-    if (head) {
-      const nl = head.indexOf(0x0a);
-      const first = parseLine(head.slice(0, nl === -1 ? head.length : nl).toString('utf8'));
+    const headLine = readFirstLine(t.fp);
+    if (headLine) {
+      const first = parseLine(headLine);
       if (first && first.type === 'session_meta') applyMeta(t, first.payload || {});
     }
     if (!t.sid) t.sid = fileSessionId(t.fp, null);
@@ -374,34 +432,41 @@ function createCodexWatch(deps) {
   }
 
   function tick() {
-    let files;
+    let found;
+    const now = Date.now();
+    const fullSweep = !booted || (tickCount % FULL_SWEEP_TICKS === 0);
+    tickCount++;
     try {
       if (!fs.existsSync(sessionsDir)) {
         if (!missingLogged) { log('codex', `no ${sessionsDir} — Codex not installed? watcher idle`); missingLogged = true; }
         return;
       }
-      files = listRolloutFiles();
+      found = listRolloutFiles();
+      if (fullSweep) {
+        const seen = new Set(found.map((f) => f.fp));
+        for (const f of sweepAllRecent()) if (!seen.has(f.fp)) found.push(f);
+      }
     } catch (e) {
       log('codex', 'scan failed:', e.message);
       return;
     }
-    const now = Date.now();
-    for (const { fp, size, mtimeMs } of files) {
-      let t = trackers.get(fp);
-      if (!t) {
-        if (now - mtimeMs > IDLE_UNTRACK_MS) continue; // 陈年文件不建 tracker
-        t = { fp, sid: null, offset: 0, carry: '', ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null, lastAgentMessage: null, titleSet: false, lastSize: 0 };
-        trackers.set(fp, t);
-        if (booted) {
-          log('codex', `new rollout: ${path.basename(fp)}`);
-        } else {
-          backfill(t, size, mtimeMs);
-          continue;
-        }
-      }
-      if (t.ignored && t.sawMeta) { t.offset = size; continue; } // subagent：光标跟上即可
-      if (now - mtimeMs > IDLE_UNTRACK_MS) { trackers.delete(fp); continue; }
-      pump(t, size);
+    // ① 发现新文件 → 建 tracker（启动第一轮走静默 backfill，之后按新会话走事件流）
+    for (const { fp, size, mtimeMs } of found) {
+      if (trackers.has(fp)) continue;
+      if (now - mtimeMs > IDLE_UNTRACK_MS) continue; // 陈年文件不建 tracker
+      const t = { fp, sid: null, offset: 0, carry: '', ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null, lastAgentMessage: null, titleSet: false };
+      trackers.set(fp, t);
+      if (booted) log('codex', `new rollout: ${path.basename(fp)}`);
+      else backfill(t, size, mtimeMs);
+    }
+    // ② 泵所有已跟踪文件——直接 stat，不依赖本轮扫描列表：旧日期目录里的
+    // 长寿会话只在全量扫描轮被「发现」，但每一轮都要跟进它的新增内容。
+    for (const [fp, t] of trackers) {
+      const e = statEntry(fp);
+      if (!e) { trackers.delete(fp); continue; }              // 文件没了
+      if (now - e.mtimeMs > IDLE_UNTRACK_MS) { trackers.delete(fp); continue; } // 凉了，退场
+      if (t.ignored && t.sawMeta) { t.offset = e.size; continue; } // subagent：光标跟上即可
+      pump(t, e.size);
     }
     booted = true;
   }
