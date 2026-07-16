@@ -11,7 +11,8 @@ const {
   windowTargetForVisual, visualAtEdge, visualAtEdgeInDirection,
   visualShiftMatches, visualShiftOffset, interpolateFrame, chatGPTVisualBounds,
   chatGPTDragCandidates, parseDragHelperResult, parseProbeHelperResult,
-  parseWarpHelperLine, warpHoldNeedsRecovery, standX, DEFAULT_RIVALS,
+  parseIsolatedDragHelperResult, parseWarpHelperLine, warpHoldNeedsRecovery,
+  standX, DEFAULT_RIVALS,
 } = require('../backend/territory');
 
 let failures = 0;
@@ -188,7 +189,7 @@ check('异常进度会 clamp，避免跟随越界', () => {
   assert.deepStrictEqual(interpolateFrame({ x: 0, y: 0 }, { x: 10, y: 20 }, 2), { x: 10, y: 20 });
 });
 
-console.log('[T3d] Swift 拖动助手：定向事件与用户真鼠标完全解耦');
+console.log('[T3d] Swift 拖动助手：普通桌宠定向事件 + ChatGPT 可恢复 HID 租约');
 check('目标 PID/window、零 warp/hide/associate、定向释放齐全才接受', () => {
   const out = 'cursor|100|200|100|200\ninterrupted|user=0\ntransport|targeted=1|pid=42|window=99|nsEvent=1|windowLocation=1|slevent=1|eventMask=1|warp=0|associate=0|hide=0\nrelease|targeted=1\noverlay|native=1|opaque=0|alpha=0|shadow=0|ignoresMouse=1|sharing=1|cornerAlpha=0|serverBounds=1|serverSharing=1\nok|targeted=1|userCursorFree=1\n';
   assert(parseDragHelperResult(out, 0).ok);
@@ -230,10 +231,19 @@ check('Electron 指针窗口已移除，原生覆盖层保持全透明且鼠标�
   assert(swift.includes('SLEventPostToPid(targetPid, event)'));
   assert(swift.includes('AXUIElementGetWindow(window, &windowID)'));
   assert(swift.includes('.mouseEventWindowUnderMousePointer'));
-  assert(!swift.includes('CGWarpMouseCursorPosition'));
-  assert(!swift.includes('CGAssociateMouseAndMouseCursorPosition'));
-  assert(!swift.includes('CGDisplayHideCursor'));
-  assert(!swift.includes('event.post(tap: .cghidEventTap)'));
+  assert(swift.includes('if windowCommand == "--isolated-drag-pid"'));
+  assert(swift.includes('CGAssociateMouseAndMouseCursorPosition(0)'));
+  assert(swift.includes('CGAssociateMouseAndMouseCursorPosition(1)'));
+  assert(swift.includes('CGDisplayHideCursor(cursorDisplay)'));
+  assert(swift.includes('CGDisplayShowCursor(cursorDisplay)'));
+  assert(swift.includes('matchingHitWindow(at: start, pid: targetPid'));
+});
+check('ChatGPT 独占 HID 租约只有完整还原鼠标后才接受成功', () => {
+  const good = 'original|100|200\nhit|target=1\nprogress|1\ncursor|100|200|100|200\nisolation|afterCapture=1|associate=0\nrestore|warp=0|associate=0|show=0\nbutton|left=0\noverlay|native=1|opaque=0|alpha=0|shadow=0|ignoresMouse=1|sharing=1|cornerAlpha=0|serverBounds=1|serverSharing=1\ntransport|isolated-hid=1|warp=0\nok|hide=0|associate=0|afterCapture=1|restored=1\n';
+  assert(parseIsolatedDragHelperResult(good, 0).ok);
+  assert(!parseIsolatedDragHelperResult(good.replace('button|left=0', 'button|left=1'), 0).ok);
+  assert(!parseIsolatedDragHelperResult(good.replace('cursor|100|200|100|200', 'cursor|100|200|120|200'), 0).ok);
+  assert(parseIsolatedDragHelperResult('hit|target=0\n', 7).miss);
 });
 check('回归：warped 最后一帧不能报胜利，必须等 stable 保持证明', () => {
   assert.strictEqual(parseWarpHelperLine('progress|1').type, 'progress');
@@ -384,10 +394,11 @@ check('defeat:AXPosition 无效+软件指针也推不动 → 拔河认怂', asyn
   assert.deepStrictEqual(phases, ['ontop', 'spotted', 'march', 'defeat']);
 });
 
-check('ChatGPT 直接走合成层推边，不再发送注定无效的定向拖拽', async () => {
+check('ChatGPT 必须由隔离 HID 真实移动 AX frame，不能再靠 compositor 返回值冒充', async () => {
   const phases = [];
-  const rivalX = 800;
-  let warpCall = null;
+  let rivalX = 800;
+  let isolatedCalls = 0;
+  let visualShift = 0;
   const world = {
     presence: () => '',
     windows: () => `ChatGPT|42|${rivalX}|300|356|320\n`,
@@ -399,25 +410,22 @@ check('ChatGPT 直接走合成层推边，不再发送注定无效的定向拖�
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
     userIdleSeconds: async () => 999,
-    dragRival: async () => { throw new Error('ChatGPT 不应发送鼠标事件'); },
-    warpRivalVisual: async (rival, dx, dy, options) => {
-      warpCall = { rival, dx, dy, options };
-      options.onProgress(1);
+    dragRival: async () => { throw new Error('ChatGPT 不应走定向事件'); },
+    isolatedDragRival: async (_rival, targetX, _rx, _ry, _duration, onProgress) => {
+      isolatedCalls++;
+      rivalX = Math.min(targetX, WA.x + WA.width - 356);
+      if (onProgress) onProgress(1);
       return { ok: true };
     },
+    warpRivalVisual: async (_rival, dx) => { visualShift = dx; return { ok: true }; },
     runOsa: fakeOsa(world),
   });
   const t = createTerritory(hooks);
   await t.tick();
-  assert(warpCall, '应启动 WindowServer 合成层位移');
-  assert.strictEqual(warpCall.dy, 0);
-  assert.strictEqual(warpCall.options.durationMs, 720);
-  assert(Number.isFinite(warpCall.options.pointerStart.x));
-  assert(phases.includes('victory'), `应完成推边，实际 phases=${phases.join(',')}`);
-  const visual = chatGPTVisualBounds({ name: 'ChatGPT', pid: 42, x: rivalX, y: 300, w: 356, h: 320 }, WA, 1);
-  const visualRight = visual.x + warpCall.dx + visual.w;
-  assert(Math.abs(visualRight - (WA.x + WA.width)) <= 12,
-    `可见本体应贴右边，实际 right=${visualRight}`);
+  assert(isolatedCalls >= 2, `应先校准再长拖，实际 ${isolatedCalls} 次`);
+  assert.strictEqual(rivalX, WA.x + WA.width - 356, '真实 AX frame 必须移动到系统边界');
+  assert(phases.includes('partial'), `系统 clamp 后应如实 partial，实际 phases=${phases.join(',')}`);
+  assert(Math.abs(visualShift - 42) < 1, `最后仅允许约 42px cosmetic 补偿，实际 ${visualShift}`);
 });
 
 check('ChatGPT 透明外框已被系统 clamp → 合成层只补齐最后约 42px', async () => {
@@ -444,7 +452,8 @@ check('ChatGPT 透明外框已被系统 clamp → 合成层只补齐最后约 42
   });
   const t = createTerritory(hooks);
   await t.tick();
-  assert(phases.includes('victory'), `透明外框贴边后应补推胜利，实际 phases=${phases.join(',')}`);
+  assert(phases.includes('partial'), `透明外框贴边后只能报告系统边界，实际 phases=${phases.join(',')}`);
+  assert(!phases.includes('victory'), '没有像素级证明时不能报告完整胜利');
   assert(Math.abs(visualShift - 42) < 1,
     `应补齐约 42px 透明留白，实际 shift=${visualShift}`);
   const visible = chatGPTVisualBounds({ name: 'ChatGPT', pid: 42, x: rivalX, y: 300, w: 356, h: 320 }, WA, 1);
@@ -453,7 +462,7 @@ check('ChatGPT 透明外框已被系统 clamp → 合成层只补齐最后约 42
     `可见本体应精确贴边，实际 right=${visibleRight}`);
 });
 
-check('ChatGPT 合成层启动失败 → 必须 defeat，不能误报 victory', async () => {
+check('ChatGPT 隔离 HID 拖拽失败 → 必须 defeat，不能回退到 compositor 假胜利', async () => {
   const phases = [];
   const rivalX = 800;
   const { hooks } = mockHooks({
@@ -462,8 +471,9 @@ check('ChatGPT 合成层启动失败 → 必须 defeat，不能误报 victory', 
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
     userIdleSeconds: async () => 999,
-    dragRival: async () => { throw new Error('ChatGPT 不应发送鼠标事件'); },
-    warpRivalVisual: async () => ({ ok: false, error: 'window warp failed: 1000' }),
+    dragRival: async () => { throw new Error('ChatGPT 不应走定向事件'); },
+    isolatedDragRival: async () => ({ ok: false, error: 'isolated drag failed' }),
+    warpRivalVisual: async () => { throw new Error('真实拖拽失败后不得用 compositor 假装移动'); },
     runOsa: fakeOsa({
       presence: () => '',
       windows: () => `ChatGPT|42|${rivalX}|300|356|320\n`,
@@ -476,10 +486,11 @@ check('ChatGPT 合成层启动失败 → 必须 defeat，不能误报 victory', 
   assert(!phases.includes('victory'), `复扫错误绝不能胜利，实际 phases=${phases.join(',')}`);
 });
 
-check('ChatGPT 合成位移成功后再次巡视不会重复推挤', async () => {
+check('ChatGPT 真实 frame 到系统边界后再次巡视不会重复长拖', async () => {
   const phases = [];
-  const rivalX = 800;
+  let rivalX = 800;
   let warpCalls = 0;
+  let isolatedCalls = 0;
   const world = {
     presence: () => '',
     windows: () => `ChatGPT|42|${rivalX}|300|356|320\n`,
@@ -491,7 +502,12 @@ check('ChatGPT 合成位移成功后再次巡视不会重复推挤', async () =>
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
     userIdleSeconds: async () => 999,
-    dragRival: async () => { throw new Error('ChatGPT 不应发送鼠标事件'); },
+    dragRival: async () => { throw new Error('ChatGPT 不应走定向事件'); },
+    isolatedDragRival: async (_rival, targetX) => {
+      isolatedCalls++;
+      rivalX = Math.min(targetX, WA.x + WA.width - 356);
+      return { ok: true };
+    },
     warpRivalVisual: async () => {
       warpCalls++;
       return { ok: true };
@@ -502,8 +518,9 @@ check('ChatGPT 合成位移成功后再次巡视不会重复推挤', async () =>
   await t.tick();
   await t.tick();
   // 第一次开战前 clearVisual 属于测试 hook，不计入 warpCalls；实际推边仅一次。
-  assert.strictEqual(warpCalls, 1, `视觉已经贴边后不应重复推挤，实际 ${warpCalls} 次`);
-  assert.strictEqual(phases.filter((phase) => phase === 'victory').length, 1);
+  assert.strictEqual(warpCalls, 1, `视觉补偿只应执行一次，实际 ${warpCalls} 次`);
+  assert.strictEqual(isolatedCalls, 2, `第二次巡视不应重复校准/长拖，实际 ${isolatedCalls} 次`);
+  assert.strictEqual(phases.filter((phase) => phase === 'partial').length, 1);
 });
 
 check('用户手上有活(输入空闲<2s)→ 软件光标不出手,静默 abort 撤退', async () => {
@@ -547,8 +564,9 @@ check('定向拖拽期间用户按下真鼠标 → 用户优先并立即 abort',
 
 check('手动巡视授权本轮软件指针，不把启动点击误判为用户干扰', async () => {
   const phases = [];
-  const rivalX = 800;
+  let rivalX = 800;
   let warpCalls = 0;
+  let isolatedCalls = 0;
   const { hooks } = mockHooks({
     isEnabled: () => false,
     rivalNames: () => [],
@@ -556,7 +574,12 @@ check('手动巡视授权本轮软件指针，不把启动点击误判为用户�
     emit: (ev) => phases.push(ev.phase),
     sleep: async () => {},
     userIdleSeconds: async () => 0.1,
-    dragRival: async () => { throw new Error('ChatGPT 不应发送鼠标事件'); },
+    dragRival: async () => { throw new Error('ChatGPT 不应走定向事件'); },
+    isolatedDragRival: async (_rival, targetX) => {
+      isolatedCalls++;
+      rivalX = Math.min(targetX, WA.x + WA.width - 356);
+      return { ok: true };
+    },
     warpRivalVisual: async () => {
       warpCalls++;
       return { ok: true };
@@ -569,8 +592,9 @@ check('手动巡视授权本轮软件指针，不把启动点击误判为用户�
   });
   const t = createTerritory(hooks);
   await t.runNow();
-  assert.strictEqual(warpCalls, 1, `手动巡视应完成一次合成推边，实际 ${warpCalls} 次`);
-  assert(phases.includes('victory'), `手动巡视应成功，实际 phases=${phases.join(',')}`);
+  assert.strictEqual(isolatedCalls, 2, `手动巡视应完成校准+长拖，实际 ${isolatedCalls} 次`);
+  assert.strictEqual(warpCalls, 1, `手动巡视最多做一次边缘 cosmetic 补偿，实际 ${warpCalls} 次`);
+  assert(phases.includes('partial'), `手动巡视应报告真实系统边界，实际 phases=${phases.join(',')}`);
 });
 
 check('shouldAbort(弹层打开)→ 广播 abort 复位表情并回家', async () => {

@@ -427,6 +427,41 @@ func physicalMouseButtonIsDown() -> Bool {
 }
 
 let windowCommand = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+if windowCommand == "--inspect-pid" && CommandLine.arguments.count >= 3 {
+  guard let pid = Int32(CommandLine.arguments[2]) else {
+    fputs("bad --inspect-pid argument\n", stderr)
+    exit(2)
+  }
+  for window in axWindows(pid: pid) {
+    var windowID = CGWindowID(0)
+    _ = AXUIElementGetWindow(window, &windowID)
+    let position = axPoint(window, kAXPositionAttribute as CFString) ?? .zero
+    let size = axSize(window, kAXSizeAttribute as CFString) ?? .zero
+    let role = axString(window, kAXRoleAttribute as CFString) ?? ""
+    let subrole = axString(window, kAXSubroleAttribute as CFString) ?? ""
+    let title = axString(window, kAXTitleAttribute as CFString) ?? ""
+    print("ax|\(windowID)|\(position.x)|\(position.y)|\(size.width)|\(size.height)|\(role)|\(subrole)|\(title)")
+  }
+  let rows = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID)
+    as? [[String: Any]]) ?? []
+  for info in rows {
+    guard let owner = info[kCGWindowOwnerPID as String] as? NSNumber,
+          owner.int32Value == pid,
+          let number = info[kCGWindowNumber as String] as? NSNumber,
+          let rawBounds = info[kCGWindowBounds as String] as? NSDictionary,
+          let bounds = CGRect(dictionaryRepresentation: rawBounds) else { continue }
+    let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+    let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? -1
+    let onscreen = (info[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true ? 1 : 0
+    let sharing = (info[kCGWindowSharingState as String] as? NSNumber)?.intValue ?? -1
+    let store = (info[kCGWindowStoreType as String] as? NSNumber)?.intValue ?? -1
+    let memory = (info[kCGWindowMemoryUsage as String] as? NSNumber)?.intValue ?? -1
+    let name = (info[kCGWindowName as String] as? String) ?? ""
+    print("cg|\(number.uint32Value)|\(bounds.origin.x)|\(bounds.origin.y)|\(bounds.width)|\(bounds.height)|\(layer)|\(alpha)|\(onscreen)|\(sharing)|\(store)|\(memory)|\(name)")
+  }
+  exit(0)
+}
+
 if windowCommand == "--preview-pointer" && CommandLine.arguments.count >= 4 {
   guard let x = Double(CommandLine.arguments[2]),
         let y = Double(CommandLine.arguments[3]) else {
@@ -671,6 +706,177 @@ if windowCommand == "--release-pid" && CommandLine.arguments.count >= 5 {
   }
   event.postToPid(pid_t(pid))
   print("release-pid|\(pid)|\(x)|\(y)")
+  exit(0)
+}
+
+// Emergency cleanup for the short exclusive HID lease used by ChatGPT. The
+// parent invokes this if the drag helper crashes or times out, so the system
+// cursor can never remain hidden/disassociated and mouseDown cannot stay held.
+if windowCommand == "--release" {
+  let source = CGEventSource(stateID: .hidSystemState)
+  let current = CGEvent(source: nil)?.location ?? .zero
+  let point: CGPoint
+  if CommandLine.arguments.count >= 4,
+     let x = Double(CommandLine.arguments[2]),
+     let y = Double(CommandLine.arguments[3]) {
+    point = CGPoint(x: x, y: y)
+  } else {
+    point = current
+  }
+  if let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
+                         mouseCursorPosition: current, mouseButton: .left) {
+    event.post(tap: .cghidEventTap)
+  }
+  let warpResult = CGWarpMouseCursorPosition(point)
+  let associateResult = CGAssociateMouseAndMouseCursorPosition(1)
+  let showResult = CGDisplayShowCursor(CGMainDisplayID())
+  let leftButtonDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
+  print("release|warp=\(warpResult.rawValue)|associate=\(associateResult.rawValue)|show=\(showResult.rawValue)|left=\(leftButtonDown ? 1 : 0)")
+  exit(warpResult == .success && associateResult == .success
+    && showResult == .success && !leftButtonDown ? 0 : 5)
+}
+
+// ChatGPT's transparent Electron overlay rejects process-targeted pointer
+// capture and cross-process window moves. Take a short, verified HID lease:
+// hardware deltas are isolated before the first warp, the real cursor is
+// hidden, and a separate native overlay visualizes the patrol pointer. The
+// exact physical cursor position and association are restored before success.
+if windowCommand == "--isolated-drag-pid" && CommandLine.arguments.count >= 12 {
+  guard let targetPid = Int32(CommandLine.arguments[2]),
+        let expectedX = Double(CommandLine.arguments[3]),
+        let expectedY = Double(CommandLine.arguments[4]),
+        let expectedW = Double(CommandLine.arguments[5]),
+        let expectedH = Double(CommandLine.arguments[6]),
+        let sx = Double(CommandLine.arguments[7]),
+        let sy = Double(CommandLine.arguments[8]),
+        let ex = Double(CommandLine.arguments[9]),
+        let ey = Double(CommandLine.arguments[10]),
+        let (_, _, score) = matchingPetWindow(
+          pid: targetPid, expectedX: expectedX, expectedY: expectedY,
+          expectedW: expectedW, expectedH: expectedH), score <= 80,
+        AXIsProcessTrusted() else {
+    fputs("isolated drag target missing or accessibility permission required\n", stderr)
+    exit(3)
+  }
+  let durationMs = max(180, min(1500,
+    Double(CommandLine.arguments[11]) ?? 520))
+  let steps = max(12, Int(durationMs / 16))
+  let source = CGEventSource(stateID: .hidSystemState)
+  guard let original = CGEvent(source: nil)?.location else {
+    fputs("could not read original cursor position\n", stderr)
+    exit(4)
+  }
+  print("original|\(original.x)|\(original.y)")
+  fflush(stdout)
+
+  // ChatGPT 的透明桌宠只有在系统光标仍与物理鼠标关联时,才会可靠地激活自己
+  // 的 pointer capture(hover 命中)。所以先只隐藏光标、保持关联完成 hover 与
+  // mouseDown 捕获;拿到 capture 之后再断开物理鼠标做隔离拖拽。光标此刻已隐藏,
+  // 提前解耦反而会让 hover 激活失效,导致 matchingHitWindow 永远命中不到桌宠。
+  let cursorDisplay = CGMainDisplayID()
+  let hideResult = CGDisplayHideCursor(cursorDisplay)
+  guard hideResult == .success else {
+    fputs("cursor hide failed\n", stderr)
+    exit(4)
+  }
+  var associationResult = CGError.success
+  let patrolPointer = PatrolPointerOverlay()
+  var cursorRestored = false
+  var mouseIsDown = false
+  var lastPoint = CGPoint(x: sx, y: sy)
+  func restoreCursor() -> (CGError, CGError, CGError) {
+    if mouseIsDown,
+       let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
+                        mouseCursorPosition: lastPoint, mouseButton: .left) {
+      up.post(tap: .cghidEventTap)
+      mouseIsDown = false
+    }
+    let warp = CGWarpMouseCursorPosition(original)
+    let associate = CGAssociateMouseAndMouseCursorPosition(1)
+    let show = CGDisplayShowCursor(cursorDisplay)
+    return (warp, associate, show)
+  }
+  defer {
+    patrolPointer.hide()
+    if !cursorRestored { _ = restoreCursor() }
+  }
+
+  var eventWarpResult = CGError.success
+  func post(_ type: CGEventType, _ point: CGPoint) {
+    patrolPointer.move(to: point)
+    lastPoint = point
+    let warped = CGWarpMouseCursorPosition(point)
+    if eventWarpResult == .success && warped != .success { eventWarpResult = warped }
+    guard let event = CGEvent(mouseEventSource: source, mouseType: type,
+                              mouseCursorPosition: point, mouseButton: .left) else { return }
+    event.post(tap: .cghidEventTap)
+  }
+
+  let start = CGPoint(x: sx, y: sy)
+  let end = CGPoint(x: ex, y: ey)
+  post(.mouseMoved, start)
+  usleep(150_000)
+  post(.mouseMoved, CGPoint(x: sx + 1, y: sy))
+  usleep(55_000)
+  post(.mouseMoved, start)
+  usleep(35_000)
+  let expected = CGRect(x: expectedX, y: expectedY, width: expectedW, height: expectedH)
+  guard matchingHitWindow(at: start, pid: targetPid, expected: expected) else {
+    let restoreResults = restoreCursor()
+    cursorRestored = restoreResults.0 == .success
+      && restoreResults.1 == .success && restoreResults.2 == .success
+    print("hit|target=0")
+    print("restore|warp=\(restoreResults.0.rawValue)|associate=\(restoreResults.1.rawValue)|show=\(restoreResults.2.rawValue)")
+    exit(7)
+  }
+  print("hit|target=1")
+  post(.leftMouseDown, start)
+  mouseIsDown = true
+  usleep(80_000)
+  // pointer capture 已建立,此刻才断开物理鼠标:后续 warp/拖拽不再被用户手部
+  // 移动干扰。失败也已被 defer→restoreCursor() 覆盖(会补 mouseUp 并恢复光标)。
+  associationResult = CGAssociateMouseAndMouseCursorPosition(0)
+  guard associationResult == .success else {
+    fputs("cursor isolation failed after capture\n", stderr)
+    exit(4)
+  }
+  for i in 1...steps {
+    let t = Double(i) / Double(steps)
+    let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+    let point = CGPoint(x: sx + (ex - sx) * eased, y: sy + (ey - sy) * eased)
+    post(.leftMouseDragged, point)
+    print("progress|\(eased)")
+    fflush(stdout)
+    usleep(useconds_t(durationMs * 1000 / Double(steps)))
+  }
+  for _ in 0..<7 {
+    post(.leftMouseDragged, end)
+    usleep(30_000)
+  }
+  post(.leftMouseUp, end)
+  mouseIsDown = false
+  usleep(80_000)
+  let overlayStatus = patrolPointer.statusLine
+  patrolPointer.hide()
+  let restoreResults = restoreCursor()
+  cursorRestored = restoreResults.0 == .success
+    && restoreResults.1 == .success && restoreResults.2 == .success
+  let restored = CGEvent(source: nil)?.location
+  let leftButtonDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
+  if let restored {
+    print("cursor|\(original.x)|\(original.y)|\(restored.x)|\(restored.y)")
+  }
+  print("isolation|afterCapture=1|associate=\(associationResult.rawValue)")
+  print("restore|warp=\(restoreResults.0.rawValue)|associate=\(restoreResults.1.rawValue)|show=\(restoreResults.2.rawValue)")
+  print("button|left=\(leftButtonDown ? 1 : 0)")
+  print(overlayStatus)
+  guard cursorRestored, eventWarpResult == .success, !leftButtonDown,
+        let restored, hypot(restored.x - original.x, restored.y - original.y) <= 2 else {
+    fputs("isolated drag restoration verification failed\n", stderr)
+    exit(5)
+  }
+  print("transport|isolated-hid=1|warp=\(eventWarpResult.rawValue)")
+  print("ok|hide=\(hideResult.rawValue)|associate=\(associationResult.rawValue)|afterCapture=1|restored=1")
   exit(0)
 }
 
