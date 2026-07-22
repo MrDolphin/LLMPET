@@ -11,7 +11,7 @@
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
-    "package:win": "electron-builder --win",
+    "package:win": "electron-builder --win --publish never",
     "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/popup-style.js && node test/branding.js"
   },
   "devDependencies": {
