@@ -78,5 +78,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "LLMPET 1.0.0" \
+            --title "LLMPET ${GITHUB_REF_NAME#v}" \
             --generate-notes

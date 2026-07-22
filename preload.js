@@ -24,11 +24,14 @@ contextBridge.exposeInMainWorld('pet', {
   territoryRunNow: () => ipcRenderer.send('territory-run-now'),
   territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),
+  // 双宠模式：只收起自己这只宠（独立事件，另一只和 app 不受影响）
+  closePet: () => ipcRenderer.send('close-pet'),
   // 手动拖动窗口
   getWinPos: () => ipcRenderer.invoke('get-win-pos'),
   setWinPos: (x, y) => ipcRenderer.send('set-win-pos', x, y),
-  // 唤起 Claude 客户端
+  // 唤起 Claude / Codex 客户端
   launchClaude: () => ipcRenderer.send('launch-claude'),
+  launchCodex: () => ipcRenderer.send('launch-codex'),
   // 原生授权：通过本地 HTTP server 回 CC 决策（allow/deny），不需按键/Accessibility
   decidePermission: (permId, behavior) => ipcRenderer.send('permission-decide', permId, behavior),
   // 对话类（继续/选择/方案）：不再替你打字，改为定位并唤起该会话所在的窗口/终端
