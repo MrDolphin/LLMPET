@@ -24,6 +24,7 @@ const publicFiles = [
 assert.strictEqual(pkg.name, 'llmpet');
 assert.strictEqual(pkg.build.productName, 'LLMPET');
 assert.strictEqual(pkg.build.win.artifactName, 'LLMPET-${version}-Windows-${arch}.${ext}');
+assert(/--publish never(?:\s|$)/.test(pkg.scripts['package:win']), 'Windows packaging must not bypass the unified Release publish job');
 assert.strictEqual(lock.name, 'llmpet');
 assert.strictEqual(lock.packages[''].name, 'llmpet');
 assert(/app\.setName\('LLMPET'\)/.test(main), 'Electron app name must use the public brand');
