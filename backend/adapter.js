@@ -246,13 +246,16 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     let reason = null;
     let choice = null;
 
-    // 「上一步干完了、下一步还没来」的间隙：
+    // Claude hook 的「上一步干完了、下一步还没来」间隙：
     //   - transcript 还在长（mtime 新鲜）= 模型在产出（重连后继续跑/流式输出）
     //     → 仍是干活，别误判摸鱼；
     //   - 文件不动才是真没动静 → 摸鱼（loafing），不硬说「思考中」。
     // 只认 PostToolUse/SubagentStop 间隙——PreToolUse 间隙是工具还在跑，仍算干活。
     // 真思考仍有渠道：UserPromptSubmit → thinking 是事件驱动的。
-    if (state === 'working'
+    // Codex 不走这条启发式：rollout 有明确 task_complete / turn_aborted，本轮首个
+    // 工具后即使长时间无落盘也仍是 Codex UI 所说的 Working，不能误报“摸鱼”。
+    if (e.agentId !== 'codex'
+      && state === 'working'
       && e.lastEvent && (e.lastEvent.rawEvent === 'PostToolUse' || e.lastEvent.rawEvent === 'SubagentStop')
       && e.idleMs > LOAF_GAP_MS) {
       const producing = e.transcriptActiveAt && (Date.now() - e.transcriptActiveAt) < TRANSCRIPT_ACTIVE_MS;

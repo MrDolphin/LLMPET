@@ -270,6 +270,16 @@ async function main() {
     const eTg = st.sessions.find((x) => x.sessionId === tgSid);
     check('间隙且 transcript 长时间不动 → loafing 摸鱼', () => assert.strictEqual(eTg.state, 'loafing'));
   }
+  const codexGapSid = 'codex-gap-session-rrrr';
+  await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: codexGapSid, cwd: '/Users/me/proj-codex' });
+  core.sessions.get(codexGapSid).agentId = 'codex'; // Codex watcher 直连 core；HTTP hook 固定是 Claude
+  core.sessions.get(codexGapSid).updatedAt = Date.now() - 6000;
+  core.sessions.get(codexGapSid).transcriptActiveAt = Date.now() - 6000;
+  {
+    const st = adapter.buildPetStats(core.buildSnapshot(), [], null);
+    const eCodex = st.sessions.find((x) => x.sessionId === codexGapSid);
+    check('Codex PostToolUse 长间隙仍是 working（等明确 task_complete）', () => assert.strictEqual(eCodex.state, 'working'));
+  }
   // 慢长任务（17m 一轮、token 缓涨）：事件 6 分钟没来但文件半分钟前还在写 → 不被卡死兜底打成 idle
   core.sessions.get(tgSid).updatedAt = Date.now() - 6 * 60 * 1000;
   core.sessions.get(tgSid).transcriptActiveAt = Date.now() - 30 * 1000;

@@ -11,10 +11,10 @@
 // 事件映射（rollout → core 状态机，词汇表完全复用 Claude 路径）：
 //   session_meta            → SessionStart(idle)   仅运行期间新建的文件
 //   user_message            → UserPromptSubmit(thinking) + 情绪嗅探
-//   task_started            → TaskStarted(thinking) 清完成徽标
+//   task_started            → TaskStarted(thinking) 清完成徽标/开启本轮
 //   function_call / custom_tool_call / web_search_call → PreToolUse(working=工具在跑)
-//   *_output / patch_apply_end / mcp_tool_call_end     → PostToolUse(thinking=琢磨下一步)
-//   reasoning / agent_reasoning                        → thinking
+//   *_output / patch_apply_end / mcp_tool_call_end     → PostToolUse(working=任务仍在执行)
+//   reasoning / agent_reasoning → 首个工具前 thinking；首个工具后保持 working
 //   task_complete            → Stop(attention) + assistant_last_output → 庆祝+气泡
 //   turn_aborted             → TurnAborted(idle) → 「中断」徽标
 //   context_compacted        → PreCompact(sweeping)
@@ -152,6 +152,10 @@ function createCodexWatch(deps) {
 
   /** @type {Map<string, object>} file path → tracker */
   const trackers = new Map();
+  // 已见文件的增量游标。长寿会话可能静默 1h 后重新写入；只删 tracker 而不保留
+  // offset，会把整份 rollout 当成新会话从头重放，触发旧欢迎/完成/气泡风暴。
+  // 启动首轮也会记录所有历史文件的 EOF，使旧会话再次活跃时只吃新增内容。
+  const cursors = new Map();
   let timer = null;
   let booted = false;      // 首轮扫描 = backfill；之后的新文件才是「新会话」
   let tickCount = 0;       // 全量扫描节拍（FULL_SWEEP_TICKS 轮一次）
@@ -198,7 +202,7 @@ function createCodexWatch(deps) {
   // rollout 永远留在「会话开始日」的目录里——ChatGPT Desktop 一个对话连聊几天，
   // 文件还在 5 天前的目录里被追加（实测踩坑）。只扫今天/昨天永远看不见它，
   // 所以启动第一轮 + 之后每 FULL_SWEEP_TICKS 轮做一次全量兜底。
-  function sweepAllRecent() {
+  function sweepAllRecent(onFile) {
     const out = [];
     const now = Date.now();
     let years;
@@ -218,7 +222,9 @@ function createCodexWatch(deps) {
           for (const n of names) {
             if (!n.endsWith('.jsonl')) continue;
             const e = statEntry(path.join(sessionsDir, y, m, d, n));
-            if (e && now - e.mtimeMs <= IDLE_UNTRACK_MS) out.push(e);
+            if (!e) continue;
+            if (onFile) onFile(e);
+            if (now - e.mtimeMs <= IDLE_UNTRACK_MS) out.push(e);
           }
         }
       }
@@ -239,6 +245,21 @@ function createCodexWatch(deps) {
 
   function update(t, state, event, extra) {
     core.updateSession(t.sid, state, event, { ...baseFields(t), ...extra });
+  }
+
+  function beginTurn(t) {
+    t.turnActive = true;
+    t.didWorkThisTurn = false;
+    t.lastTool = null;
+  }
+
+  function markWork(t) {
+    t.turnActive = true;
+    t.didWorkThisTurn = true;
+  }
+
+  function activeTurnState(t) {
+    return t.didWorkThisTurn ? 'working' : 'thinking';
   }
 
   // ── 逐行事件处理（仅 live 流量；backfill 不走这里） ─────────────────────────
@@ -263,22 +284,25 @@ function createCodexWatch(deps) {
 
     if (type === 'compacted') { update(t, 'sweeping', 'PreCompact'); return; }
 
-    // rollout 是「事项完成才落盘」：一行的含义是“这件事刚做完、下一件开始了”。
-    // 所以 function_call 落盘 = 工具正在跑(working)；*_output 落盘 = 工具跑完、
-    // 模型开始琢磨下一步(thinking)；reasoning 落盘 = 想完了马上要动手（很快被
-    // 下一个 function_call 顶掉）。这样宠物状态才跟得上 Codex UI 的 working⇄thinking。
+    // rollout 是「事项完成才落盘」：function_call 落盘 = 工具正在跑。工具结果
+    // 落盘并不表示整轮任务停止执行，后续 reasoning 也属于这次 Working 生命周期。
+    // 因此本轮首个工具前可显示 thinking；一旦发生工具活动就锁定 working，直到
+    // task_complete / turn_aborted。不能拿“最后一行是不是 reasoning”猜整轮状态。
     if (type === 'response_item') {
       const pt = p.type;
       if (pt === 'function_call' || pt === 'custom_tool_call') {
+        markWork(t);
         t.lastTool = mapTool(p.name);
         update(t, 'working', 'PreToolUse', { toolName: t.lastTool });
       } else if (pt === 'web_search_call') {
+        markWork(t);
         t.lastTool = 'WebSearch';
         update(t, 'working', 'PreToolUse', { toolName: 'WebSearch' });
       } else if (pt === 'function_call_output' || pt === 'custom_tool_call_output') {
-        update(t, 'thinking', 'PostToolUse', { toolName: t.lastTool || null });
+        markWork(t); // watcher 若在工具执行中恢复，只有 output 也足以确认本轮已开工
+        update(t, 'working', 'PostToolUse', { toolName: t.lastTool || null });
       } else if (pt === 'reasoning') {
-        update(t, 'thinking', 'Reasoning');
+        update(t, activeTurnState(t), 'Reasoning');
       }
       return;
     }
@@ -288,6 +312,7 @@ function createCodexWatch(deps) {
 
     switch (et) {
       case 'user_message': {
+        beginTurn(t);
         const msg = typeof p.message === 'string' ? p.message : '';
         const extra = {};
         if (!t.titleSet) {
@@ -300,6 +325,7 @@ function createCodexWatch(deps) {
         break;
       }
       case 'task_started':
+        beginTurn(t);
         update(t, 'thinking', 'TaskStarted');
         break;
       case 'agent_message':
@@ -320,30 +346,40 @@ function createCodexWatch(deps) {
         }
         t.lastAgentMessage = null;
         update(t, 'attention', 'Stop', extra);
+        t.turnActive = false;
+        t.didWorkThisTurn = false;
         break;
       }
       case 'turn_aborted':
         update(t, 'idle', 'TurnAborted');
+        t.turnActive = false;
+        t.didWorkThisTurn = false;
         break;
       case 'context_compacted':
         update(t, 'sweeping', 'PreCompact');
         break;
-      // *_end = 工具刚跑完 → 模型接下来在想（与 *_output 同语义，映射 thinking）
+      // *_end 仍处于同一个正在执行的任务；它们也可能是 watcher 恢复后看到的
+      // 第一条工具事件，因此必须补记 didWorkThisTurn。
       case 'patch_apply_end':
         if (p.success === false) update(t, 'error', 'PostToolUseFailure', { toolName: 'Edit' });
-        else update(t, 'thinking', 'PostToolUse', { toolName: 'Edit' });
+        else {
+          markWork(t);
+          update(t, 'working', 'PostToolUse', { toolName: 'Edit' });
+        }
         break;
       case 'mcp_tool_call_end':
-        update(t, 'thinking', 'PostToolUse', {
+        markWork(t);
+        update(t, 'working', 'PostToolUse', {
           toolName: (p.invocation && p.invocation.tool) ? String(p.invocation.tool) : 'Tool',
         });
         break;
       case 'web_search_end':
-        update(t, 'thinking', 'PostToolUse', { toolName: 'WebSearch' });
+        markWork(t);
+        update(t, 'working', 'PostToolUse', { toolName: 'WebSearch' });
         break;
-      // agent_reasoning：一段思考文本产出完毕，回合仍在推进 → thinking
+      // agent_reasoning：首个工具前是思考；工具链开始后仍属于执行阶段。
       case 'agent_reasoning':
-        update(t, 'thinking', 'Reasoning');
+        update(t, activeTurnState(t), 'Reasoning');
         break;
       case 'token_count': {
         const cu = toContextUsage(p.info);
@@ -377,15 +413,20 @@ function createCodexWatch(deps) {
     }
   }
 
-  // ── 启动 backfill：头部读 meta、尾部读近况，静默入库 ─────────────────────────
-  function backfill(t, size, mtimeMs) {
+  function hydrateMeta(t) {
     const headLine = readFirstLine(t.fp);
     if (headLine) {
       const first = parseLine(headLine);
       if (first && first.type === 'session_meta') applyMeta(t, first.payload || {});
     }
     if (!t.sid) t.sid = fileSessionId(t.fp, null);
+  }
+
+  // ── 启动 backfill：头部读 meta、尾部读近况，静默入库 ─────────────────────────
+  function backfill(t, size, mtimeMs) {
+    hydrateMeta(t);
     t.offset = size; // 历史不回放，此后只吃新增
+    cursors.set(t.fp, { offset: size, carry: '' });
     if (t.ignored) return;
     if (Date.now() - mtimeMs > BACKFILL_MAX_AGE_MS) return; // 太久没动的不上列表
 
@@ -440,6 +481,15 @@ function createCodexWatch(deps) {
       if (!obj) continue;
       try { handleLine(t, obj); } catch (e) { log('codex', 'handleLine error:', e.message); }
     }
+    cursors.set(t.fp, { offset: t.offset, carry: t.carry });
+  }
+
+  function newTracker(fp, cursor) {
+    return {
+      fp, sid: null, offset: cursor ? cursor.offset : 0, carry: cursor ? cursor.carry : '',
+      ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null,
+      lastAgentMessage: null, titleSet: false, turnActive: false, didWorkThisTurn: false,
+    };
   }
 
   function tick() {
@@ -455,7 +505,12 @@ function createCodexWatch(deps) {
       found = listRolloutFiles();
       if (fullSweep) {
         const seen = new Set(found.map((f) => f.fp));
-        for (const f of sweepAllRecent()) if (!seen.has(f.fp)) found.push(f);
+        // 首轮把所有历史 rollout 的 EOF 记下来。之后某个旧文件重新活跃时，
+        // 可以从这个游标继续，而不是因为 mtime 变新就误当作全新文件重放。
+        const rememberAtBoot = !booted
+          ? (f) => { if (!cursors.has(f.fp)) cursors.set(f.fp, { offset: f.size, carry: '' }); }
+          : null;
+        for (const f of sweepAllRecent(rememberAtBoot)) if (!seen.has(f.fp)) found.push(f);
       }
     } catch (e) {
       log('codex', 'scan failed:', e.message);
@@ -465,18 +520,36 @@ function createCodexWatch(deps) {
     for (const { fp, size, mtimeMs } of found) {
       if (trackers.has(fp)) continue;
       if (now - mtimeMs > IDLE_UNTRACK_MS) continue; // 陈年文件不建 tracker
-      const t = { fp, sid: null, offset: 0, carry: '', ignored: false, sawMeta: false, cwd: null, model: null, lastTool: null, lastAgentMessage: null, titleSet: false };
+      const prior = booted ? cursors.get(fp) : null;
+      const t = newTracker(fp, prior);
       trackers.set(fp, t);
-      if (booted) log('codex', `new rollout: ${path.basename(fp)}`);
-      else backfill(t, size, mtimeMs);
+      if (!booted) {
+        backfill(t, size, mtimeMs);
+      } else if (prior) {
+        // 旧/暂停会话恢复：meta 只用于恢复身份，不派发 SessionStart；随后只泵增量。
+        hydrateMeta(t);
+        if (t.offset > size) { t.offset = size; t.carry = ''; }
+        log('codex', `resume rollout: ${path.basename(fp)} @ ${t.offset}`);
+      } else {
+        log('codex', `new rollout: ${path.basename(fp)}`);
+      }
     }
     // ② 泵所有已跟踪文件——直接 stat，不依赖本轮扫描列表：旧日期目录里的
     // 长寿会话只在全量扫描轮被「发现」，但每一轮都要跟进它的新增内容。
     for (const [fp, t] of trackers) {
       const e = statEntry(fp);
       if (!e) { trackers.delete(fp); continue; }              // 文件没了
-      if (now - e.mtimeMs > IDLE_UNTRACK_MS) { trackers.delete(fp); continue; } // 凉了，退场
-      if (t.ignored && t.sawMeta) { t.offset = e.size; continue; } // subagent：光标跟上即可
+      if (now - e.mtimeMs > IDLE_UNTRACK_MS) {
+        cursors.set(fp, { offset: t.offset, carry: t.carry });
+        trackers.delete(fp);
+        continue;
+      } // 凉了，退场但保留游标
+      if (t.ignored && t.sawMeta) {
+        t.offset = e.size;
+        t.carry = '';
+        cursors.set(fp, { offset: t.offset, carry: '' });
+        continue;
+      } // subagent：光标跟上即可
       pump(t, e.size);
     }
     booted = true;
@@ -494,7 +567,7 @@ function createCodexWatch(deps) {
     if (timer) { clearInterval(timer); timer = null; }
   }
 
-  return { start, stop, tick, getRateLimits: () => rateLimits, _trackers: trackers };
+  return { start, stop, tick, getRateLimits: () => rateLimits, _trackers: trackers, _cursors: cursors };
 }
 
 module.exports = { createCodexWatch, toContextUsage, toRateLimits, mapTool };

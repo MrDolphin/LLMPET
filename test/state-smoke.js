@@ -92,7 +92,9 @@ async function main() {
     w.handlers.stats(baseStats({ workingCount: 1 }));
     w.handlers.event({ kind: 'user-turn', project: 'p' });
     w.handlers.event({ kind: 'operation', tool: 'Bash', icon: '⚙️', detail: '运行命令' });
-    check('transient 存续期 operation 不盖 thinking', () => assert(cat.classList.contains('thinking')));
+    check('首个 operation 立即结束 thinking 过渡态并进入 working', () => assert(cat.classList.contains('working')));
+    w.handlers.stats(baseStats({ workingCount: 1 }));
+    check('后续快照不让已清理的 thinking 复活', () => assert(cat.classList.contains('working')));
     // needsinput 稳态不被 op 降级
     const w2 = world();
     const cat2 = w2.elements('cat');

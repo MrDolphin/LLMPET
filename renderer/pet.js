@@ -1016,8 +1016,11 @@ window.pet.onEvent((ev) => {
       // 高优先级稳态（等授权/等回复/出错/清理）不被工具事件降级成 working——
       // 之前 error 期间其它会话干活会导致 working↔error 持续闪烁。
       const hold = state === 'waiting' || state === 'needsinput' || state === 'error' || state === 'sweeping';
-      // transient（thinking/happy/talking…）存续期间也不盖（STATES.md：短暂态高于聚合）
-      if (!hold && perfNow() >= transientUntil) {
+      // “收到任务”产生的 thinking 只是等待首个动作的过渡态；真实工具一开始就应
+      // 立刻切到 working。庆祝/说话/情绪等其它 transient 仍完整播放。
+      const startingWork = transientState === 'thinking' && perfNow() < transientUntil;
+      if (!hold && (startingWork || perfNow() >= transientUntil)) {
+        if (startingWork) clearTransient();
         setState('working');
         playAction(ev.tool, ev.icon);
       }

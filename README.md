@@ -64,7 +64,7 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 ```
 
 - **不装任何钩子**：Codex 只有一个全局 `notify` 配置位（常被 ChatGPT 桌面 App 占用），所以走「监听 rollout 文件」——增量 tail、零配置、卸载无残留。
-- 事件映射：`user_message→思考`、`exec_command/apply_patch→干活`、`task_complete→完成庆祝+💬`、`turn_aborted→中断徽标`、`token_count→上下文%`；guardian / auto-review 等 subagent 内部线程自动过滤。
+- 事件映射：`user_message→思考`；首个 `exec_command/apply_patch` 后整轮保持“干活中”（工具结果和中间 reasoning 不会误降成思考），直到 `task_complete→完成庆祝+💬` 或 `turn_aborted→中断徽标`；`token_count→上下文%`。guardian / auto-review 等 subagent 内部线程自动过滤，长会话恢复时只读取新增事件、不重放历史。
 - **额度**：Codex 没有逐 token 价目，面板显示套餐窗口用量（5h 主窗口 + 周窗口 %，来自 rollout 的 `rate_limits`）。
 - **两种形态**（托盘 → 设置 → 分身）：
   - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 蓝终端块）；
