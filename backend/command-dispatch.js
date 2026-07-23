@@ -31,6 +31,18 @@ const TERMINAL_PASTE_SCRIPT = [
   '  return "not-found"',
   'end run',
 ].join('\n');
+const CODEX_DESKTOP_PASTE_SCRIPT = [
+  'tell application "System Events"',
+  '  set procs to (every application process whose bundle identifier is "com.openai.codex")',
+  '  if (count of procs) is 0 then return "not-running"',
+  '  set frontmost of (item 1 of procs) to true',
+  '  delay 0.25',
+  '  keystroke "v" using command down',
+  '  delay 0.1',
+  '  key code 36',
+  'end tell',
+  'return "ok"',
+].join('\n');
 
 function cleanTty(value) {
   if (typeof value !== 'string') return null;
@@ -47,6 +59,14 @@ function routeForSession(session, platform = process.platform) {
   const app = String(session.terminalApp || '').toLowerCase();
   if (platform === 'darwin' && app === 'terminal' && cleanTty(session.terminalTty)) {
     return { kind: 'mac-terminal', label: '精确直发 · Terminal', exact: true };
+  }
+  if (
+    platform === 'darwin' &&
+    session.agentId === 'codex' &&
+    /codex desktop/i.test(String(session.originator || '')) &&
+    SESSION_ID_RE.test(String(session.id || ''))
+  ) {
+    return { kind: 'codex-desktop', label: '精确直发 · Codex 客户端', exact: true };
   }
   if (SESSION_ID_RE.test(String(session.id || ''))) {
     return session.agentId === 'codex'
@@ -72,14 +92,73 @@ function validPrompt(prompt) {
   return typeof prompt === 'string' && prompt.trim().length > 0 && prompt.length <= MAX_PROMPT_CHARS;
 }
 
+function transcriptHasPrompt(text, prompt) {
+  const matches = (actual) =>
+    typeof actual === 'string' &&
+    (actual === prompt || actual.replace(/\r?\n$/, '') === prompt.replace(/\r?\n$/, ''));
+  for (const line of String(text || '').split('\n')) {
+    if (!line) continue;
+    try {
+      const obj = JSON.parse(line);
+      const p = obj && obj.payload;
+      if (obj.type === 'event_msg' && p && p.type === 'user_message' && matches(p.message)) return true;
+      if (obj.type === 'response_item' && p && p.role === 'user' && Array.isArray(p.content)) {
+        if (p.content.some((part) => part && matches(part.text))) return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+async function waitForTranscriptPrompt(transcriptPath, prompt, startSize, options = {}) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return false;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 6000;
+  const pollMs = Number.isFinite(options.pollMs) ? options.pollMs : 120;
+  const started = Date.now();
+  let offset = Math.max(0, Number(startSize) || 0);
+  let carry = '';
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const stat = fs.statSync(transcriptPath);
+      if (stat.size < offset) { offset = 0; carry = ''; }
+      if (stat.size > offset) {
+        const length = stat.size - offset;
+        const buf = Buffer.alloc(length);
+        let fd;
+        try {
+          fd = fs.openSync(transcriptPath, 'r');
+          fs.readSync(fd, buf, 0, length, offset);
+        } finally {
+          if (fd !== undefined) fs.closeSync(fd);
+        }
+        offset = stat.size;
+        carry += buf.toString('utf8');
+        const cut = carry.lastIndexOf('\n');
+        if (cut >= 0) {
+          const complete = carry.slice(0, cut + 1);
+          carry = carry.slice(cut + 1);
+          if (transcriptHasPrompt(complete, prompt)) return true;
+        }
+      }
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return transcriptHasPrompt(carry, prompt);
+}
+
 function createCommandDispatcher(options = {}) {
   const platform = options.platform || process.platform;
   const execImpl = options.execFile || execFile;
   const spawnImpl = options.spawn || spawn;
   const findCliImpl = options.findCli || findCli;
   const resumeProbeMs = Number.isFinite(options.resumeProbeMs) ? options.resumeProbeMs : 650;
+  const desktopOpenDelayMs = Number.isFinite(options.desktopOpenDelayMs) ? options.desktopOpenDelayMs : 850;
   const copyText = typeof options.copyText === 'function' ? options.copyText : () => {};
   const focus = typeof options.focusSession === 'function' ? options.focusSession : async () => false;
+  const openCodexThread = typeof options.openCodexThread === 'function' ? options.openCodexThread : async () => false;
+  const verifyPrompt = typeof options.verifyPrompt === 'function'
+    ? options.verifyPrompt
+    : (session, prompt, startSize) => waitForTranscriptPrompt(session.transcriptPath, prompt, startSize);
 
   async function stageFallback(session, prompt, detail) {
     try { copyText(prompt); } catch {}
@@ -181,6 +260,48 @@ function createCommandDispatcher(options = {}) {
       return stageFallback(session, prompt, 'Terminal 标签页定位或输入失败；Prompt 已复制并聚焦目标 session。');
     }
 
+    if (route.kind === 'codex-desktop') {
+      let startSize = 0;
+      try { startSize = fs.statSync(session.transcriptPath).size; } catch {}
+      try { copyText(prompt); } catch {}
+      let opened = false;
+      try { opened = (await openCodexThread(session.id)) !== false; } catch {}
+      if (!opened) {
+        return stageFallback(session, prompt, 'Codex 客户端无法打开指定 session；Prompt 已复制。');
+      }
+      await new Promise((resolve) => setTimeout(resolve, desktopOpenDelayMs));
+      const sent = await runFile(execImpl, 'osascript', ['-e', CODEX_DESKTOP_PASTE_SCRIPT]);
+      if (!sent.ok || sent.stdout !== 'ok') {
+        return {
+          ok: true,
+          submitted: false,
+          copied: true,
+          focused: opened,
+          route: 'codex-desktop',
+          message: '已打开指定 Codex session，但输入框粘贴失败；Prompt 已保留在剪贴板。',
+        };
+      }
+      const verified = await verifyPrompt(session, prompt, startSize);
+      if (verified) {
+        return {
+          ok: true,
+          submitted: true,
+          copied: true,
+          focused: true,
+          route: 'codex-desktop',
+          message: '已发送到所选 Codex 客户端 session，并在对话记录中确认。',
+        };
+      }
+      return {
+        ok: true,
+        submitted: false,
+        copied: true,
+        focused: true,
+        route: 'codex-desktop',
+        message: '已打开指定 Codex session 并尝试发送，但未在对话记录中确认；Prompt 已保留在剪贴板。',
+      };
+    }
+
     if (route.kind === 'codex-resume' || route.kind === 'claude-resume') {
       const resumed = await nativeResume(session, prompt, route.kind);
       if (resumed.ok) return resumed;
@@ -196,9 +317,12 @@ function createCommandDispatcher(options = {}) {
 module.exports = {
   MAX_PROMPT_CHARS,
   TERMINAL_PASTE_SCRIPT,
+  CODEX_DESKTOP_PASTE_SCRIPT,
   cleanTty,
   routeForSession,
   validPrompt,
+  transcriptHasPrompt,
+  waitForTranscriptPrompt,
   SESSION_ID_RE,
   createCommandDispatcher,
 };

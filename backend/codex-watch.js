@@ -240,6 +240,7 @@ function createCodexWatch(deps) {
     };
     if (t.cwd) f.cwd = t.cwd;
     if (t.model) f.model = t.model;
+    if (t.originator) f.originator = t.originator;
     return f;
   }
 
@@ -457,6 +458,7 @@ function createCodexWatch(deps) {
       transcriptPath: t.fp,
       sessionTitle: title,
       contextUsage,
+      originator: t.originator || null,
       sourcePid: null,
       headless: false,
       createdAt: mtimeMs,

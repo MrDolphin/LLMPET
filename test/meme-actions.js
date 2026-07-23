@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { loadCatalog, publicCatalog, getMeme } = require('../backend/meme-catalog');
-const { routeForSession, createCommandDispatcher } = require('../backend/command-dispatch');
+const { routeForSession, createCommandDispatcher, transcriptHasPrompt } = require('../backend/command-dispatch');
 const { loadRenderer } = require('./dom-stub');
 
 async function main() {
@@ -34,6 +34,17 @@ async function main() {
   const codexId = '22222222-2222-4222-8222-222222222222';
   assert.strictEqual(routeForSession({ id: claudeId, agentId: 'claude-code' }, 'darwin').kind, 'claude-resume');
   assert.strictEqual(routeForSession({ id: codexId, agentId: 'codex' }, 'darwin').kind, 'codex-resume');
+  assert.strictEqual(
+    routeForSession({ id: codexId, agentId: 'codex', originator: 'Codex Desktop' }, 'darwin').kind,
+    'codex-desktop',
+  );
+  assert.strictEqual(
+    transcriptHasPrompt(
+      JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: meme.prompt.text + '\n' } }),
+      meme.prompt.text,
+    ),
+    true,
+  );
 
   const calls = [];
   const dispatcher = createCommandDispatcher({
@@ -80,6 +91,33 @@ async function main() {
   assert.strictEqual(codexResume.submitted, true);
   assert.strictEqual(codexResume.route, 'codex-resume');
   assert.deepStrictEqual(resumeCalls[1][1].slice(0, 5), ['exec', 'resume', '--json', '--skip-git-repo-check', codexId]);
+
+  const desktopCalls = [];
+  const desktopDispatcher = createCommandDispatcher({
+    platform: 'darwin',
+    desktopOpenDelayMs: 0,
+    copyText: (text) => desktopCalls.push(['copy', text]),
+    openCodexThread: async (id) => { desktopCalls.push(['open', id]); return true; },
+    execFile: (file, args, _opts, cb) => {
+      desktopCalls.push([file, args]);
+      cb(null, 'ok\n', '');
+    },
+    verifyPrompt: async (_session, prompt) => {
+      desktopCalls.push(['verify', prompt]);
+      return true;
+    },
+  });
+  const codexDesktop = await desktopDispatcher.dispatch({
+    id: codexId,
+    agentId: 'codex',
+    originator: 'Codex Desktop',
+    transcriptPath: path.join(root, 'fake-rollout.jsonl'),
+  }, meme.prompt.text);
+  assert.strictEqual(codexDesktop.submitted, true);
+  assert.strictEqual(codexDesktop.route, 'codex-desktop');
+  assert.deepStrictEqual(desktopCalls.find((c) => c[0] === 'open'), ['open', codexId]);
+  assert(desktopCalls.some((c) => c[0] === 'osascript'));
+  assert(desktopCalls.some((c) => c[0] === 'verify'));
 
   const html = fs.readFileSync(path.join(root, 'renderer', 'pet.html'), 'utf8');
   const js = fs.readFileSync(path.join(root, 'renderer', 'pet.js'), 'utf8');

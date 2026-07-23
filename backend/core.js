@@ -137,6 +137,7 @@ function createCore(options = {}) {
     setField(s, 'terminalTty', f.terminalTty);
     setField(s, 'wtHwnd', f.wtHwnd);
     setField(s, 'ghosttyTerminalId', f.ghosttyTerminalId);
+    setField(s, 'originator', f.originator);
     setField(s, 'model', f.model);
     if (typeof f.headless === 'boolean') s.headless = f.headless;
     if (f.sessionTitle != null) s.sessionTitle = f.sessionTitle;

@@ -554,6 +554,7 @@ function bootBackend() {
   commandDispatcher = createCommandDispatcher({
     copyText: (text) => clipboard.writeText(text),
     focusSession,
+    openCodexThread: (sessionId) => shell.openExternal(`codex://threads/${encodeURIComponent(sessionId)}`),
   });
 
   // Codex 后端：只读监听 ~/.codex/sessions 的 rollout（无钩子、零侵入）。
