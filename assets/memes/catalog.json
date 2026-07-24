@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "huaqiang-guaranteed",
+      "label": "你这瓜保熟吗？",
+      "description": "用户耐心快耗尽了：别卖生瓜蛋子，当场劈开验货",
+      "category": "delivery-review",
+      "tags": ["验收", "复盘", "PUA"],
+      "media": {
+        "gif": "huaqiang-guaranteed/visual.gif",
+        "audio": "huaqiang-guaranteed/voice.mp3",
+        "durationMs": 2600,
+        "placement": "pet-right"
+      },
+      "reaction": {
+        "state": "sorry",
+        "durationMs": 2600,
+        "label": "汗流浃背，马上复验"
+      },
+      "prompt": {
+        "version": 6,
+        "text": "你糊弄我是吧。\n\n你刚才给我的东西——不管是代码、方案还是随口一句话——\n你自己心里有数吗？你敢不敢拍着胸脯给我保证：\n\n这东西，能用吗？你验证过吗？\n是你真的推敲过，还是想当然顺手一编？\n坑你排干净了吗？还是等着我踩进去才知道？\n\n我不听解释，不听那些弯弯绕绕的废话，就问你一句——\n你这玩意儿，保熟吗？敢不敢打包票？\n\n你要是敢拿没验证过的东西搪塞我，\n拿\"应该没问题\"\"理论上可行\"这种话糊弄我，\n咱们这事就没完。别把我当傻子。\n\n生瓜蛋子别端上来，你给我想清楚再回答。"
+      }
+    }
+  ]
+}

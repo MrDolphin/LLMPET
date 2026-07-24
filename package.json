@@ -1,6 +1,6 @@
 {
   "name": "llmpet",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "桌面宠物：实时呈现 Claude Code 与 OpenAI Codex 的状态、消息、用量和 Claude 授权",
   "main": "main.js",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
     "package:win": "electron-builder --win --publish never",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/popup-style.js && node test/branding.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/meme-actions.js && node test/popup-style.js && node test/branding.js"
   },
   "devDependencies": {
     "electron": "^33.2.0",

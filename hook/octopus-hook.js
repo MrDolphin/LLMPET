@@ -128,14 +128,23 @@ function buildBody(event, p) {
     if (emo) body.assistant_emotion = emo;
   }
 
-  // Terminal ownership for focus + headless detection.
-  if (FOCUS_EVENTS.has(event)) {
+  // `claude --resume -p` launched by a meme action belongs to the user-selected
+  // original session. Do not overwrite that session's focus route/headless bit
+  // with the short-lived resume process, and do not retire it on CLI exit.
+  const memeResume = process.env.LLMPET_MEME_RESUME === '1';
+  if (memeResume) {
+    body.headless = false;
+    body.external_resume = true;
+  } else if (FOCUS_EVENTS.has(event)) {
     try {
       const r = pidwalk.resolve(process.ppid, 10, sid);
       if (r.sourcePid) body.source_pid = r.sourcePid;
       if (r.pidChain && r.pidChain.length) body.pid_chain = r.pidChain;
       if (r.editor) body.editor = r.editor;
       if (r.tmuxSocket) body.tmux_socket = r.tmuxSocket;
+      if (r.tmuxClient) body.tmux_client = r.tmuxClient;
+      if (r.terminalApp) body.terminal_app = r.terminalApp;
+      if (r.terminalTty) body.terminal_tty = r.terminalTty;
       body.headless = r.headless === true; // background `claude -p` runs
     } catch {}
   }
