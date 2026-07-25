@@ -29,7 +29,7 @@ function baseStats(over = {}) {
 }
 
 function world() {
-  const w = loadRenderer(['shared/states.js', 'renderer/pet.js']);
+  const w = loadRenderer(['shared/i18n.js', 'shared/states.js', 'renderer/pet.js']);
   w.handlers.config({ skin: 'cat', muted: true }); // muted: 免声音路径干扰
   return w;
 }
@@ -185,7 +185,7 @@ async function main() {
 
   console.log('[R9] 启动不闪 idle');
   {
-    const w = loadRenderer(['renderer/pet.js']);
+    const w = loadRenderer(['shared/i18n.js', 'renderer/pet.js']);
     w.handlers.config({ skin: 'cat', muted: true });
     // 模拟 init 拿到快照（getStats stub 返回 null，这里直接补推快照 + 确认不被覆盖）
     w.handlers.stats(baseStats({ workingCount: 1 }));

@@ -94,13 +94,26 @@ function createStubWorld() {
   const catImg = byId('cat-img');
   catImg.setAttribute('src', '../assets/cat/cat-idle.gif');
 
+  // Only the [data-*] attribute selectors applyStaticI18n() uses. The stub has
+  // no parsed markup, so this scans the elements pet.js actually created — real
+  // data-i18n bindings live in pet.html and are covered by the app itself.
+  const DATA_SEL = /^\[data-([a-z0-9-]+)\]$/;
+  const querySelectorAll = (sel) => {
+    const m = DATA_SEL.exec(String(sel).trim());
+    if (!m) return [];
+    const key = m[1].replace(/-([a-z])/g, (_s, c) => c.toUpperCase());
+    return [...elements.values()].filter((el) => el.dataset && el.dataset[key] !== undefined);
+  };
+
   const document = {
     getElementById: byId,
     createElement: (t) => makeElement(t),
     body: makeElement('body'),
+    documentElement: makeElement('html'),
     activeElement: null,
     elementFromPoint: () => null,
     addEventListener: () => {},
+    querySelectorAll,
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)

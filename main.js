@@ -33,6 +33,12 @@ const { createCodexWatch } = require('./backend/codex-watch');
 const { publicCatalog, getMeme } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const transport = require('./backend/transport');
+const i18n = require('./shared/i18n');
+
+const t = i18n.t;
+// Main-process strings (tray, dialogs, adapter-built labels) are localized at
+// build time, so the language must be live before the first menu or event.
+i18n.setLang(config.get().lang);
 
 const PRELOAD = path.join(__dirname, 'preload.js');
 const BASE_W = 320, BASE_H = 340, TALL_H = 560, BIG_W = 440, BIG_H = 600;
@@ -88,6 +94,7 @@ function frontendConfig(agent = 'all') {
     territorySupported: process.platform === 'darwin' && agent !== 'codex',
     agent,
     petMode: c.petMode,
+    lang: c.lang,
   };
 }
 
@@ -406,10 +413,9 @@ function ensureTerritoryPermission() {
   try { systemPreferences.isTrustedAccessibilityClient(true); } catch {}
   dialog.showMessageBox({
     type: 'info',
-    message: '巡视桌宠需要「辅助功能」权限',
-    detail: '小章鱼要移动别的桌宠窗口，才能把闯进地盘的它顶到屏幕边上。\n' +
-      '点「打开辅助功能设置」，在列表里勾选 LLMPET 即可——授权成功会自动开始巡视，不用退出重开。',
-    buttons: ['打开辅助功能设置', '稍后'],
+    message: t('dlg.axTitle'),
+    detail: t('dlg.axBody') + t('dlg.axHint'),
+    buttons: [t('dlg.axOpen'), t('dlg.later')],
     defaultId: 0,
     cancelId: 1,
   }).then(({ response }) => {
@@ -608,15 +614,15 @@ function bootBackend() {
       if (entry.isElicitation) {
         choice = adapter.buildElicitationChoice(
           { id: entry.id, sessionId: entry.sessionId, questions: entry.questions }, lite);
-        kind = 'needsinput'; reason = '回复';
+        kind = 'needsinput'; reason = 'reply';
       } else if (entry.toolName === 'ExitPlanMode') {
         choice = adapter.buildPlanChoice(
           { id: entry.id, sessionId: entry.sessionId, toolInput: entry.toolInput }, lite);
-        kind = 'needsinput'; reason = '审方案';
+        kind = 'needsinput'; reason = 'plan';
       } else {
         choice = adapter.buildPermChoice(
           { id: entry.id, sessionId: entry.sessionId, toolName: entry.toolName, toolInput: entry.toolInput, suggestions: entry.suggestions }, lite);
-        kind = 'waiting'; reason = '授权';
+        kind = 'waiting'; reason = 'perm';
       }
       // A parked permission needs the user's eyes. In menubar mode (or if the pet
       // was hidden) the ask panel would render into an invisible window and CC
@@ -740,26 +746,28 @@ function registerIpc() {
   ipcMain.on('focus-session', (_e, sessionId) => {
     focusSession(core.getSession(sessionId));
   });
-  ipcMain.handle('meme-catalog', () => publicCatalog());
+  ipcMain.handle('meme-catalog', () => publicCatalog(i18n.getLang()));
   ipcMain.handle('meme-trigger', async (e, sessionId, memeId) => {
-    const meme = getMeme(memeId);
-    if (!meme) return { ok: false, submitted: false, message: '未知表情包，已拒绝执行。' };
+    // The prompt itself is localized too: an English UI that fires a Chinese
+    // prompt would drag the whole session into Chinese.
+    const meme = getMeme(memeId, i18n.getLang());
+    if (!meme) return { ok: false, submitted: false, message: t('meme.unknown') };
     const session = typeof sessionId === 'string' && core ? core.getSession(sessionId) : null;
     if (!session || session.headless || session.ended || session.state === 'sleeping') {
-      return { ok: false, submitted: false, message: '目标 session 已离线或不可交互，请重新选择。' };
+      return { ok: false, submitted: false, message: t('meme.targetOffline') };
     }
     const senderState = stateOfSender(e.sender);
     if (!senderState || (senderState.agent !== 'all' && adapter.agentOf(session) !== senderState.agent)) {
-      return { ok: false, submitted: false, message: '目标 session 不属于当前桌宠，已拒绝误发。' };
+      return { ok: false, submitted: false, message: t('meme.targetForeign') };
     }
-    const publicMeme = publicCatalog().items.find((item) => item.id === meme.id);
+    const publicMeme = publicCatalog(i18n.getLang()).items.find((item) => item.id === meme.id);
     sendWin(senderState.win, 'pet:meme', {
       ...publicMeme,
       sessionId: session.id,
       project: session.sessionTitle || path.basename(session.cwd || '') || String(session.id).slice(-6),
       ts: Date.now(),
     });
-    if (!commandDispatcher) return { ok: false, submitted: false, message: 'Prompt 下发器尚未就绪。' };
+    if (!commandDispatcher) return { ok: false, submitted: false, message: t('meme.noDispatcher') };
     const result = await commandDispatcher.dispatch(session, meme.prompt.text);
     log(
       'meme',
@@ -917,6 +925,20 @@ function applyBudget(v) {
   refreshTrayMenu();
 }
 
+// Language switch (tray → Settings → Language). Main-process copy is baked into
+// the strings the adapter already pushed, so a plain re-broadcast would leave
+// stale labels on screen until the next session event — force a fresh stats
+// emit so every list, badge and bubble re-renders in the new language at once.
+function applyLang(lang) {
+  if (config.get().lang === lang) return;
+  config.save({ lang });
+  i18n.setLang(lang);
+  broadcastConfig();
+  emitStats();
+  refreshTrayMenu();
+  log('main', `lang → ${lang}`);
+}
+
 // ── tray ──────────────────────────────────────────────────────────────────────
 function buildTray() {
   let img;
@@ -925,7 +947,7 @@ function buildTray() {
     if (process.platform === 'darwin') img.setTemplateImage(true);
   } catch {}
   tray = new Tray(img || nativeImage.createEmpty());
-  tray.setToolTip('LLMPET — Claude Code / Codex 桌宠');
+  tray.setToolTip(t('tray.tooltip'));
   refreshTrayMenu();
   tray.on('click', () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); });
 }
@@ -939,31 +961,36 @@ function refreshTrayMenu() {
   const budget = Number(cfg.budget5h) || 0;
   const petMode = cfg.petMode || 'single';
   const skinCodex = cfg.skinCodex || 'cat';
+  const lang = cfg.lang || 'zh';
+  tray.setToolTip(t('tray.tooltip'));
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '📊 详情面板', click: openPanel },
-    { label: '🐙 显示桌宠', click: () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); } },
+    { label: t('tray.panel'), click: openPanel },
+    { label: t('tray.showPet'), click: () => { ensurePetWindows(); for (const st of petStates()) st.win.show(); } },
     // 复选开关：勾上 = 双宠（Codex 分身出现），取消 = 单宠（一只盯全部后端）
-    { label: '🛰️ Codex 桌宠', type: 'checkbox', checked: petMode === 'duo',
+    { label: t('tray.codexPet'), type: 'checkbox', checked: petMode === 'duo',
       click: () => applyPetMode(config.get().petMode === 'duo' ? 'single' : 'duo') },
     { type: 'separator' },
-    { label: '⚙️ 设置', enabled: false },
-    { label: petMode === 'duo' ? '　形象（Claude 宠）' : '　形象', submenu: [
-      { label: '章鱼', type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
-      { label: '像素怪兽', type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
-      { label: '月薪喵', type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
+    { label: t('tray.settings'), enabled: false },
+    { label: t('tray.language'), submenu: i18n.LANGS.map((code) => ({
+      label: t('lang.' + code), type: 'radio', checked: lang === code, click: () => applyLang(code),
+    })) },
+    { label: petMode === 'duo' ? t('tray.skinClaude') : t('tray.skin'), submenu: [
+      { label: t('skin.mascot'), type: 'radio', checked: skin === 'mascot', click: () => applySkin('mascot') },
+      { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
+      { label: t('skin.cat'), type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
     ] },
-    ...(petMode === 'duo' ? [{ label: '　形象（Codex 宠）', submenu: [
-      { label: '章鱼', type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
-      { label: '像素怪兽', type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
-      { label: '月薪喵', type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
+    ...(petMode === 'duo' ? [{ label: t('tray.skinCodex'), submenu: [
+      { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
+      { label: t('skin.pixel'), type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
+      { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
     ] }] : []),
-    { label: '　形态', submenu: [
-      { label: '浮游桌宠', type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
-      { label: '角落面板', type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
-      { label: '菜单栏（隐藏桌宠）', type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
+    { label: t('tray.shape'), submenu: [
+      { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
+      { label: t('shape.panel'), type: 'radio', checked: mode === 'panel', click: () => applyMode('panel') },
+      { label: t('shape.menubar'), type: 'radio', checked: mode === 'menubar', click: () => applyMode('menubar') },
     ] },
-    { label: '　5h 预算', submenu: [
-      { label: '关闭', type: 'radio', checked: !budget, click: () => applyBudget(0) },
+    { label: t('tray.budget'), submenu: [
+      { label: t('tray.budgetOff'), type: 'radio', checked: !budget, click: () => applyBudget(0) },
       { label: '$10', type: 'radio', checked: budget === 10, click: () => applyBudget(10) },
       { label: '$20', type: 'radio', checked: budget === 20, click: () => applyBudget(20) },
       { label: '$30', type: 'radio', checked: budget === 30, click: () => applyBudget(30) },
@@ -971,23 +998,23 @@ function refreshTrayMenu() {
       { label: '$100', type: 'radio', checked: budget === 100, click: () => applyBudget(100) },
     ] },
     ...(process.platform === 'darwin' ? [
-      { label: '　🥊 自动巡逻（顶走别的桌宠）', type: 'checkbox', checked: !!cfg.territory,
+      { label: t('tray.patrol'), type: 'checkbox', checked: !!cfg.territory,
         click: () => applyTerritory(!config.get().territory) },
-      { label: '　🔎 立即巡视一次', click: runTerritoryNow },
+      { label: t('tray.patrolNow'), click: runTerritoryNow },
     ] : []),
-    { label: muted ? '　🔔 取消静音' : '　🔇 静音', click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
+    { label: muted ? t('tray.unmute') : t('tray.mute'), click: () => { config.save({ muted: !muted }); broadcastConfig(); refreshTrayMenu(); } },
     { type: 'separator' },
-    { label: '🚀 唤起 Claude', click: () => launchClaude({}).catch(() => {}) },
-    { label: '🛰️ 唤起 Codex', click: () => launchCodex({}).catch(() => {}) },
-    { label: '📄 打开日志', click: () => shell.openPath(LOG_PATH) },
+    { label: t('tray.launchClaude'), click: () => launchClaude({}).catch(() => {}) },
+    { label: t('tray.launchCodex'), click: () => launchCodex({}).catch(() => {}) },
+    { label: t('tray.openLog'), click: () => shell.openPath(LOG_PATH) },
     { type: 'separator' },
-    { label: '🧹 卸载 Claude 钩子', click: () => {
+    { label: t('tray.uninstallHook'), click: () => {
       // Stop the settings watcher first — otherwise it sees our hooks vanish and
       // re-registers them within 800ms, silently undoing this uninstall.
       try { if (stopWatcher) { stopWatcher(); stopWatcher = null; } } catch {}
       hooks.uninstall();
     } },
-    { label: '⏻ 退出', click: () => app.quit() },
+    { label: t('tray.quit'), click: () => app.quit() },
   ]));
 }
 
@@ -1040,9 +1067,8 @@ if (!gotTheLock) {
     if (rival) {
       log('main', `another LLMPET server is live on 127.0.0.1:${rival} — quitting (OCTOPUS_ALLOW_MULTI=1 to bypass)`);
       dialog.showErrorBox(
-        'LLMPET 已在运行',
-        `检测到另一个 LLMPET 实例正在端口 ${rival} 上服务（可能来自其他代码副本）。\n` +
-        '本实例将退出，避免抢占会话事件。\n开发需要多开时：OCTOPUS_ALLOW_MULTI=1'
+        t('dlg.dupTitle'),
+        t('dlg.dupBody', { port: rival }) + t('dlg.dupHint')
       );
       app.quit();
       return;

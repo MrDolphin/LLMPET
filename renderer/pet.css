@@ -351,7 +351,12 @@ body.skin-cat #cat { display: flex; }
 .radial:not(.hidden) .radial-item { opacity: 1; transform: scale(1); }
 .radial-item .ri-ic { font-size: 20px; line-height: 1; color: #5a3a2a; }
 .radial-item:hover .ri-ic { color: #d97757; }
-.radial-item .ri-lb { font-size: 8px; color: #8a5a44; line-height: 1; }
+.radial-item .ri-lb {
+  font-size: 8px; color: #8a5a44; line-height: 1;
+  /* EN/JA labels are longer than the 2-char Chinese ones; clamp them to the
+     circle so a long word ellipsizes instead of overlapping its neighbours. */
+  max-width: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .radial-item:hover { transform: scale(1.16); background: #fff; }
 .radial-item:active { transform: scale(0.95); }
 .radial-item .ri-badge {

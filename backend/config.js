@@ -24,6 +24,7 @@ const DEFAULTS = Object.freeze({
   petMode: 'single',      // 'single' 一只宠监控全部后端 | 'duo' Claude/Codex 各一只
   skinCodex: 'cat',       // 双宠模式里 Codex 宠的形象（和主形象错开才认得出谁是谁）
   petPositionCodex: null, // {x,y} | null — Codex 宠的落脚点
+  lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
 });
 
 let cache = null;
@@ -51,6 +52,7 @@ function sanitize(raw) {
   if (raw.petPositionCodex && Number.isFinite(raw.petPositionCodex.x) && Number.isFinite(raw.petPositionCodex.y)) {
     out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }
+  if (['zh', 'en', 'ja'].includes(raw.lang)) out.lang = raw.lang;
   return out;
 }
 

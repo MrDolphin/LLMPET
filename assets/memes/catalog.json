@@ -21,6 +21,20 @@
       "prompt": {
         "version": 6,
         "text": "你糊弄我是吧。\n\n你刚才给我的东西——不管是代码、方案还是随口一句话——\n你自己心里有数吗？你敢不敢拍着胸脯给我保证：\n\n这东西，能用吗？你验证过吗？\n是你真的推敲过，还是想当然顺手一编？\n坑你排干净了吗？还是等着我踩进去才知道？\n\n我不听解释，不听那些弯弯绕绕的废话，就问你一句——\n你这玩意儿，保熟吗？敢不敢打包票？\n\n你要是敢拿没验证过的东西搪塞我，\n拿\"应该没问题\"\"理论上可行\"这种话糊弄我，\n咱们这事就没完。别把我当傻子。\n\n生瓜蛋子别端上来，你给我想清楚再回答。"
+      },
+      "i18n": {
+        "en": {
+          "label": "Source: trust me bro?",
+          "description": "Patience gone — no unverified claims, prove it actually runs",
+          "reactionLabel": "Cold sweat — re-verifying now",
+          "promptText": "You're hand-waving at me.\n\nThat thing you just handed me — code, a plan, or some off-the-cuff line —\ndo you actually know it holds up? Would you put your name on it?\n\nDoes it run? Did you verify it, or did you just assume?\nDid you genuinely think it through, or did you pattern-match and ship?\nDid you clear the traps, or am I supposed to find them by stepping in one?\n\nI don't want the explanation. I don't want the hedging. One question:\n\nIs this actually done — or is the source \"trust me bro\"?\n\nIf you're pushing something you never verified,\nif you're papering over it with \"should be fine\" or \"in theory this works,\"\nthen we are not done here. Don't play me for a fool.\n\nDon't serve me something you haven't cut open yourself.\nGo check it, then answer me."
+        },
+        "ja": {
+          "label": "それってあなたの感想ですよね？",
+          "description": "もう我慢の限界 — 感想じゃなくて根拠を出して",
+          "reactionLabel": "冷や汗、今すぐ検証し直します",
+          "promptText": "それ、ごまかしてますよね。\n\nさっき渡してきたもの——コードでも、方針でも、口から出まかせの一言でも——\n自分で分かってますか？胸を張って保証できますか？\n\nそれ、動きますか？検証しましたか？\n本当に考え抜いたのか、それっぽく書いて終わりにしたのか。\n地雷は片付けましたか？それとも私が踏むまで気づかないつもりですか？\n\n言い訳も、回りくどい前置きもいりません。一つだけ聞きます——\n\nそれって、あなたの感想ですよね？根拠、出せますか？\n\n検証していないものでごまかそうとしたり、\n「たぶん大丈夫」「理論上は動くはず」で済ませるつもりなら、\nこの話は終わりません。舐めないでください。\n\n自分で確かめていないものを出さないで。\nちゃんと調べてから答えてください。"
+        }
       }
     }
   ]

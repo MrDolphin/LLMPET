@@ -3,6 +3,10 @@
 const $ = (id) => document.getElementById(id);
 let config = { mode: 'pet', skin: 'mascot', budget5h: 0 };
 let lastOpKey = null;
+const t = (key, vars) => window.OctoI18n.t(key, vars);
+// Date formatting follows the UI language, not the OS locale.
+const LOCALE_TAG = { zh: 'zh-CN', en: 'en-US', ja: 'ja-JP' };
+
 let hoursSummary = ''; // 24h 视图默认读数（鼠标移开时恢复）
 let calSummary = '';   // 日历默认读数
 const dKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -22,20 +26,23 @@ function shortModel(m) {
   return String(m).replace(/^claude-/, '').replace(/\[1m\]/, '·1M');
 }
 
+let lastStats = null; // kept so a language switch can relabel without a new push
+
 function render(s) {
   if (!s) return;
+  lastStats = s;
   // 头部
   if (s.active && s.active.project) {
     $('active-sub').textContent = `${s.active.project} · ${shortModel(s.active.model)}`;
   }
   // 大数
   $('today-cost').textContent = '$' + (s.today.cost || 0).toFixed(3);
-  $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + ' 轮';
+  $('today-tokens').textContent = fmt(s.today.tokens) + ' tokens · ' + s.today.messages + t('panel.rounds');
   $('win-cost').textContent = '$' + (s.window5h.cost || 0).toFixed(3);
   if (s.window5h.tokens > 0 && s.window5h.resetTs) {
-    $('win-reset').textContent = fmt(s.window5h.tokens) + ' tok · ' + timeStr(s.window5h.resetTs) + ' 重置';
+    $('win-reset').textContent = fmt(s.window5h.tokens) + ' tok · ' + timeStr(s.window5h.resetTs) + t('panel.reset');
   } else {
-    $('win-reset').textContent = '窗口空闲';
+    $('win-reset').textContent = t('panel.windowIdle');
   }
 
   // 预算条
@@ -60,9 +67,9 @@ function render(s) {
     cfill.style.width = pct + '%';
     cfill.classList.toggle('warn', pct >= 80);
     const bits = [];
-    if (rl.resetsAt) bits.push(timeStr(rl.resetsAt) + ' 重置');
-    if (rl.secondaryUsedPercent != null) bits.push('周窗口 ' + Math.round(rl.secondaryUsedPercent) + '%');
-    if (rl.planType) bits.push(rl.planType + ' 套餐');
+    if (rl.resetsAt) bits.push(timeStr(rl.resetsAt) + t('panel.reset'));
+    if (rl.secondaryUsedPercent != null) bits.push(t('panel.weekWindow') + Math.round(rl.secondaryUsedPercent) + '%');
+    if (rl.planType) bits.push(rl.planType + t('panel.plan'));
     $('codex-foot').textContent = bits.join(' · ');
   } else {
     $('codex-wrap').classList.add('hidden');
@@ -95,7 +102,7 @@ function render(s) {
   const ops = s.lastOps || [];
   const list = $('ops');
   if (ops.length === 0) {
-    list.innerHTML = '<li class="empty">等待操作…</li>';
+    list.innerHTML = '<li class="empty">' + escapeHtml(t('panel.waitingOps')) + '</li>';
   } else {
     const topKey = ops[0].ts + ops[0].detail;
     const isNew = topKey !== lastOpKey;
@@ -132,7 +139,7 @@ function fitPanelHeight() {
 function renderByModel(byModel) {
   const bm = $('by-model');
   const entries = Object.entries(byModel).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
-  if (!entries.length) { bm.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+  if (!entries.length) { bm.innerHTML = '<div class="empty">' + escapeHtml(t('panel.noData')) + '</div>'; return; }
   const totCost = entries.reduce((s, [, v]) => s + (v.cost || 0), 0);
   const totTok = entries.reduce((s, [, v]) => s + (v.tokens || 0), 0);
   const base = totCost || 1;
@@ -141,7 +148,7 @@ function renderByModel(byModel) {
     const pct = Math.round(((v.cost || 0) / base) * 100);
     const hasDetail = (v.input || v.output || v.cacheCreate || v.cacheRead);
     const detail = hasDetail
-      ? `<div class="m-detail">入 ${fmt(v.input)} · 出 ${fmt(v.output)} · 缓写 ${fmt(v.cacheCreate)} · 缓读 ${fmt(v.cacheRead)}${v.msgs ? ' · ' + v.msgs + ' 轮' : ''}</div>`
+      ? `<div class="m-detail">${escapeHtml(t('panel.modelDetail', { in: fmt(v.input), out: fmt(v.output), cw: fmt(v.cacheCreate), cr: fmt(v.cacheRead) }))}${v.msgs ? escapeHtml(t('panel.modelRounds', { n: v.msgs })) : ''}</div>`
       : '';
     html += `<div class="m-item">`
       + `<div class="m-head"><span class="mc">${escapeHtml(shortModel(model))}</span>`
@@ -150,26 +157,27 @@ function renderByModel(byModel) {
       + `<span class="m-tok">${fmt(v.tokens)} · ${pct}%</span></div>`
       + detail + `</div>`;
   }
-  html += `<div class="m-item m-total"><div class="m-head"><span class="mc">合计</span>`
+  html += `<div class="m-item m-total"><div class="m-head"><span class="mc">${escapeHtml(t('panel.total'))}</span>`
     + `<span class="m-bar"></span><b class="m-cost">$${totCost.toFixed(3)}</b>`
     + `<span class="m-tok">${fmt(totTok)}</span></div></div>`;
   bm.innerHTML = html;
 }
 
+// key (not label): resolved at render time so a language switch relabels rows.
 const STATE_META = {
-  working: { label: '干活中', cls: 'st-working' },
-  juggling: { label: '并行子任务', cls: 'st-working' },
-  sweeping: { label: '清理上下文', cls: 'st-working' },
-  thinking: { label: '思考中', cls: 'st-thinking' },
-  loafing: { label: '摸鱼中', cls: 'st-idle' },
-  waiting: { label: '等你处理', cls: 'st-waiting' },
-  needsinput: { label: '等你回复', cls: 'st-needsinput' },
-  error: { label: '出错了', cls: 'st-error' },
-  done: { label: '刚完成', cls: 'st-done' },
-  idle: { label: '空闲', cls: 'st-idle' },
-  sleeping: { label: '休息中', cls: 'st-sleeping' },
-  greet: { label: '新会话', cls: 'st-greet' },
-  talking: { label: '回应中', cls: 'st-talking' },
+  working: { key: 'state.working', cls: 'st-working' },
+  juggling: { key: 'state.juggling', cls: 'st-working' },
+  sweeping: { key: 'state.sweeping', cls: 'st-working' },
+  thinking: { key: 'state.thinking', cls: 'st-thinking' },
+  loafing: { key: 'state.loafing', cls: 'st-idle' },
+  waiting: { key: 'state.waiting', cls: 'st-waiting' },
+  needsinput: { key: 'state.needsinput', cls: 'st-needsinput' },
+  error: { key: 'state.error', cls: 'st-error' },
+  done: { key: 'state.done', cls: 'st-done' },
+  idle: { key: 'state.idle', cls: 'st-idle' },
+  sleeping: { key: 'state.sleeping', cls: 'st-sleeping' },
+  greet: { key: 'state.greet', cls: 'st-greet' },
+  talking: { key: 'state.talking', cls: 'st-talking' },
 };
 function renderChart(hourly) {
   const el = $('chart');
@@ -187,7 +195,7 @@ function renderChart(hourly) {
       return `<div class="${cls}" data-h="${h}" data-c="${c.toFixed(3)}" style="height:${c <= 0 ? 4 : pct}%" title="${h}:00 · $${c.toFixed(3)}"></div>`;
     })
     .join('');
-  hoursSummary = `今日 <b>$${total.toFixed(2)}</b> · 峰值 ${peakH}点 <b>$${peakV.toFixed(2)}</b>`;
+  hoursSummary = t('panel.hoursSummary', { total: total.toFixed(2), peakH, peakV: peakV.toFixed(2) });
   const ro = $('hours-readout');
   if (ro) ro.innerHTML = hoursSummary;
 }
@@ -223,7 +231,7 @@ function renderCal(daily) {
     html += '</div>';
   }
   el.innerHTML = html;
-  calSummary = `近 ${list.length} 天合计 <b>$${total.toFixed(2)}</b>`;
+  calSummary = t('panel.calSummary', { n: list.length, total: total.toFixed(2) });
   const cr = $('cal-readout');
   if (cr) cr.innerHTML = calSummary;
 }
@@ -237,7 +245,7 @@ const AGENT_ICON = {
 function renderSessList(sessions) {
   const el = $('sess-list');
   if (!sessions.length) {
-    el.innerHTML = '<div class="empty">暂无活跃会话</div>';
+    el.innerHTML = '<div class="empty">' + escapeHtml(t('panel.noActiveSession')) + '</div>';
     return;
   }
   el.innerHTML = sessions
@@ -248,13 +256,13 @@ function renderSessList(sessions) {
         : s.state;
       const m = STATE_META[effState] || STATE_META.idle;
       const detail =
-        effState === 'waiting' ? `等你${s.reason || '处理'}`
-        : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || '等你回复')
+        effState === 'waiting' ? escapeHtml(s.reason ? t('wait.' + s.reason) : t('wait.default'))
+        : effState === 'needsinput' ? escapeHtml((s.choice && s.choice.question) || t('state.needsinput'))
         : (effState === 'working' || effState === 'juggling' || effState === 'sweeping' || effState === 'thinking') && s.op ? escapeHtml(s.op)
-        : escapeHtml(m.label);
+        : escapeHtml(t(m.key));
       const icon = AGENT_ICON[s.agent] || AGENT_ICON.claude;
       const who = s.agent === 'codex' ? 'Codex' : 'Claude';
-      return `<div class="row sess"><span class="badge ${m.cls}">${m.label}</span><span class="sess-agent" title="${who}">${icon}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
+      return `<div class="row sess"><span class="badge ${m.cls}">${escapeHtml(t(m.key))}</span><span class="sess-agent" title="${who}">${icon}</span><span class="sess-proj">${escapeHtml(s.project)}</span><span class="sess-op">${detail}</span></div>`;
     })
     .join('');
 }
@@ -269,7 +277,7 @@ function renderTodos(todos, proj) {
   const prog = $('todo-prog');
   const pj = $('todo-proj');
   if (!todos.length) {
-    el.innerHTML = '<div class="empty">当前没有待办</div>';
+    el.innerHTML = '<div class="empty">' + escapeHtml(t('panel.noTodo')) + '</div>';
     if (prog) prog.textContent = '';
     if (pj) pj.textContent = '';
     return;
@@ -286,10 +294,10 @@ function renderTodos(todos, proj) {
 }
 
 const BG_META = {
-  running: { label: '该跑', cls: 'st-working' },
-  suspect: { label: '可疑', cls: 'st-waiting' },
-  unregistered: { label: '疑似僵尸', cls: 'st-waiting' },
-  ended: { label: '已结束', cls: 'st-idle' },
+  running: { key: 'bg.running', cls: 'st-working' },
+  suspect: { key: 'bg.suspect', cls: 'st-waiting' },
+  unregistered: { key: 'bg.unregistered', cls: 'st-waiting' },
+  ended: { key: 'bg.ended', cls: 'st-idle' },
 };
 function ageStr(sec) {
   if (sec == null) return '';
@@ -306,9 +314,9 @@ function renderBg(bg) {
   const block = $('bg-block');
   if (block) block.style.display = items.length ? '' : 'none';
   const head = $('bg-head');
-  if (head) head.textContent = `后台任务 ✅${bg.running || 0} · 🧟${bg.zombie || 0}`;
+  if (head) head.textContent = t('panel.bgHead', { running: bg.running || 0, zombie: bg.zombie || 0 });
   if (!items.length) {
-    el.innerHTML = '<div class="empty">没有长跑的后台进程 — 干净</div>';
+    el.innerHTML = '<div class="empty">' + escapeHtml(t('panel.bgClean')) + '</div>';
     return;
   }
   el.innerHTML = items
@@ -316,7 +324,7 @@ function renderBg(bg) {
       const m = BG_META[it.status] || BG_META.ended;
       const ic = it.status === 'running' ? '✅' : it.status === 'ended' ? '⚪' : '🧟';
       const purpose = it.purpose ? escapeHtml(it.purpose) : escapeHtml(String(it.cmd).slice(0, 48));
-      return `<div class="row sess"><span class="badge ${m.cls}">${ic}${m.label}</span><span class="sess-proj">${purpose}</span><span class="sess-op">${ageStr(it.ageSec)} · ${it.stop ? escapeHtml(it.stop) : ''}</span></div>`;
+      return `<div class="row sess"><span class="badge ${m.cls}">${ic}${escapeHtml(t(m.key))}</span><span class="sess-proj">${purpose}</span><span class="sess-op">${ageStr(it.ageSec)} · ${it.stop ? escapeHtml(it.stop) : ''}</span></div>`;
     })
     .join('');
 }
@@ -342,17 +350,33 @@ window.pet.onPrice((m) => {
   const el = $('price-src');
   if (!el || !m) return;
   if (m.live) {
-    const when = m.ts ? new Date(m.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '缓存';
-    el.textContent = `💲 价目：在线 ${m.count} 型号 · ${when} 更新（每24h自动）`;
+    const when = m.ts ? new Date(m.ts).toLocaleString(LOCALE_TAG[window.OctoI18n.getLang()], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : t('panel.priceCache');
+    el.textContent = t('panel.priceOnline', { count: m.count, when });
   } else {
-    el.textContent = '💲 价目：内置兜底表（在线源暂不可用）';
+    el.textContent = t('panel.priceFallback');
   }
 });
 window.pet.onConfig((cfg) => {
   if (!cfg) return;
+  const langChanged = cfg.lang && cfg.lang !== window.OctoI18n.getLang();
   config = { ...config, ...cfg };
+  if (langChanged) {
+    window.OctoI18n.setLang(cfg.lang);
+    applyStaticI18n();
+    if (lastStats) render(lastStats); // relabel live rows without waiting for the next push
+  }
   applyConfigUI();
 });
+
+// Static markup ships with its Chinese text inline so the panel is never blank
+// before the first config push; data-i18n rewrites it per language.
+function applyStaticI18n() {
+  const lang = window.OctoI18n.getLang();
+  document.documentElement.lang = lang;
+  document.title = t('panel.title');
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+}
 
 $('close').addEventListener('click', () => window.pet.closePanel());
 document.querySelectorAll('#mode-seg .seg-btn').forEach((b) =>
@@ -396,14 +420,15 @@ $('chart').addEventListener('mouseleave', () => { $('hours-readout').innerHTML =
 // 悬停看具体数值：日历格子
 $('cal').addEventListener('mouseover', (e) => {
   const cell = e.target.closest('.cal-cell');
-  if (cell) $('cal-readout').innerHTML = `${cell.dataset.k} · <b>$${cell.dataset.c}</b> · ${cell.dataset.t} tok · ${cell.dataset.m} 轮`;
+  if (cell) $('cal-readout').innerHTML = t('panel.calReadout', { k: cell.dataset.k, c: cell.dataset.c, t: cell.dataset.t, m: cell.dataset.m });
 });
 $('cal').addEventListener('mouseleave', () => { $('cal-readout').innerHTML = calSummary; });
 
 // 初始化
 (async () => {
   const cfg = await window.pet.getConfig();
-  if (cfg) { config = { ...config, ...cfg }; applyConfigUI(); }
+  if (cfg) { config = { ...config, ...cfg }; window.OctoI18n.setLang(cfg.lang || 'zh'); applyConfigUI(); }
+  applyStaticI18n();
   const s = await window.pet.getStats();
   if (s) render(s);
 })();

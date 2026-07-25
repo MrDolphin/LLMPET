@@ -13,6 +13,7 @@
 // a `context` field is added so the supplemented frontend can show context %.
 
 const path = require('path');
+const { t } = require('../shared/i18n');
 
 const TOOL_ICON = {
   Edit: '📝', MultiEdit: '📝', Write: '📝', NotebookEdit: '📝',
@@ -22,12 +23,14 @@ const TOOL_ICON = {
   // Codex 专属工具（codex-watch 归一化后的词）；exec/apply_patch 等已映射到上面的既有词
   Js: '🧮', Wait: '⏳',
 };
-const TOOL_LABEL = {
-  Edit: '编辑文件', MultiEdit: '编辑文件', Write: '写文件', NotebookEdit: '编辑笔记本',
-  Read: '读取文件', Bash: '运行命令', Grep: '搜索代码', Glob: '查找文件',
-  WebSearch: '联网搜索', WebFetch: '抓取网页', Task: '派出子 agent', Agent: '派出子 agent',
-  TodoWrite: '更新待办',
-  Js: '跑 JS 代码', Wait: '等命令输出',
+// Tool → i18n key. The label itself is resolved per call so a language switch
+// takes effect on the next stats push without reloading the module.
+const TOOL_LABEL_KEY = {
+  Edit: 'Edit', MultiEdit: 'Edit', Write: 'Write', NotebookEdit: 'NotebookEdit',
+  Read: 'Read', Bash: 'Bash', Grep: 'Grep', Glob: 'Glob',
+  WebSearch: 'WebSearch', WebFetch: 'WebFetch', Task: 'Task', Agent: 'Task',
+  TodoWrite: 'TodoWrite',
+  Js: 'Js', Wait: 'Wait',
 };
 
 // core 的 agentId → 前端的 agent 短词（会话行图标 / 事件路由按这个分流）
@@ -36,7 +39,11 @@ function agentOf(entry) {
 }
 
 function toolIcon(tool) { return TOOL_ICON[tool] || '🔧'; }
-function toolLabel(tool) { return TOOL_LABEL[tool] || tool || '处理中'; }
+function toolLabel(tool) {
+  const key = TOOL_LABEL_KEY[tool];
+  if (key) return t('tool.' + key);
+  return tool || t('tool.default');
+}
 
 // 「最近事件是工具活动」判定——op 标签只该跟着这些事件走
 const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop']);
@@ -51,29 +58,31 @@ const TRANSCRIPT_ACTIVE_MS = 150 * 1000;
 // Friendly bubble text per Claude Code API/server error kind.
 function errorMessage(type) {
   switch (type) {
-    case 'rate_limit': return '🚦 被限流了，稍等…';
+    case 'rate_limit': return t('err.rateLimit');
     case 'server_error':
     case 'overloaded_error':
     case 'overloaded':
-    case 'api_error': return '🌐 服务器开小差了，正在重试…';
-    case 'billing_error': return '💳 账单/额度异常';
+    case 'api_error': return t('err.server');
+    case 'billing_error': return t('err.billing');
     case 'authentication_failed':
-    case 'oauth_org_not_allowed': return '🔑 鉴权失败';
-    case 'model_not_found': return '🤖 模型不可用';
-    case 'max_output_tokens': return '✂️ 输出超长被截断';
-    default: return '😵 出了点状况，在想办法…';
+    case 'oauth_org_not_allowed': return t('err.auth');
+    case 'model_not_found': return t('err.model');
+    case 'max_output_tokens': return t('err.maxTokens');
+    default: return t('err.default');
   }
 }
 
 function projectName(entry) {
   if (entry.sessionTitle) return entry.sessionTitle;
   if (entry.cwd) return path.basename(entry.cwd) || entry.cwd;
-  return String(entry.id || '').slice(-6) || '会话';
+  return String(entry.id || '').slice(-6) || t('sess.fallbackName');
 }
 
+// NB: the local was called `t` before i18n landed — renamed so it can never
+// shadow the translator in a future edit here.
 function clip(s, n) {
-  const t = String(s || '').replace(/\s+/g, ' ').trim();
-  return t.length > n ? t.slice(0, n - 1) + '…' : t;
+  const str = String(s || '').replace(/\s+/g, ' ').trim();
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
 }
 
 // Light markdown strip for the speech bubble (so **bold**, `code`, # headings,
@@ -122,20 +131,20 @@ function humanizeTool(toolName, input) {
   const i = input && typeof input === 'object' ? input : {};
   switch (toolName) {
     case 'Bash':
-      return '运行命令：' + clip(i.command || i.cmd || '', 80);
+      return t('perm.runCommand') + clip(i.command || i.cmd || '', 80);
     case 'Edit':
     case 'MultiEdit':
     case 'Write':
     case 'NotebookEdit':
-      return '修改文件：' + clip(i.file_path || i.path || i.notebook_path || '', 60);
+      return t('perm.editFile') + clip(i.file_path || i.path || i.notebook_path || '', 60);
     case 'Read':
-      return '读取文件：' + clip(i.file_path || i.path || '', 60);
+      return t('perm.readFile') + clip(i.file_path || i.path || '', 60);
     case 'WebFetch':
-      return '抓取网页：' + clip(i.url || '', 60);
+      return t('perm.fetchUrl') + clip(i.url || '', 60);
     case 'WebSearch':
-      return '联网搜索：' + clip(i.query || '', 60);
+      return t('perm.webSearch') + clip(i.query || '', 60);
     default:
-      return clip(toolName, 40) + ' 需要授权';
+      return clip(toolName, 40) + t('perm.needsApproval');
   }
 }
 
@@ -143,25 +152,25 @@ function humanizeTool(toolName, input) {
 function suggestionLabel(sg) {
   if (!sg || typeof sg !== 'object') return null;
   if (sg.type === 'setMode') {
-    return sg.mode === 'plan' ? '🅿️ 切到计划模式'
-      : sg.mode === 'acceptEdits' ? '✍️ 自动接受编辑'
-      : '设为 ' + clip(sg.mode, 16);
+    return sg.mode === 'plan' ? t('perm.modePlan')
+      : sg.mode === 'acceptEdits' ? t('perm.modeAcceptEdits')
+      : t('perm.modeOther') + clip(sg.mode, 16);
   }
   if (sg.type === 'addRules' || Array.isArray(sg.rules)) {
     const rules = (sg.rules || []).map((r) => (typeof r === 'string' ? r : (r.ruleContent || r.toolName || ''))).filter(Boolean);
-    return '🔓 始终允许：' + clip(rules.join(', ') || '此操作', 36);
+    return t('perm.alwaysAllow') + clip(rules.join(', ') || t('perm.thisAction'), 36);
   }
   return null;
 }
 
 function buildPermChoice(perm, entry) {
-  const options = [{ label: '✅ 允许', key: 'allow' }];
+  const options = [{ label: t('perm.allow'), key: 'allow' }];
   const sgs = Array.isArray(perm.suggestions) ? perm.suggestions : [];
   for (let i = 0; i < sgs.length && i < 4; i++) {
     const lbl = suggestionLabel(sgs[i]);
     if (lbl) options.push({ label: lbl, key: 'suggestion:' + i });
   }
-  options.push({ label: '⛔ 拒绝', key: 'deny' });
+  options.push({ label: t('perm.deny'), key: 'deny' });
   return {
     kind: 'perm',
     sessionId: perm.sessionId,
@@ -183,9 +192,9 @@ function buildPlanChoice(perm, entry) {
     sessionId: perm.sessionId,
     permId: perm.id,
     project: entry ? projectName(entry) : (perm.sessionId || '?'),
-    header: '方案评审',
-    question: plan ? clip(plainText(plan), 900) : '请审阅这个方案',
-    options: [{ label: '✅ 批准方案', key: 'allow' }],
+    header: t('perm.planHeader'),
+    question: plan ? clip(plainText(plan), 900) : t('perm.planQuestion'),
+    options: [{ label: t('perm.planApprove'), key: 'allow' }],
     allowInput: true, // feedback box for "打回并反馈"
     multi: false,
   };
@@ -201,7 +210,7 @@ function buildElicitationChoice(perm, entry) {
     permId: perm.id,
     project: entry ? projectName(entry) : (perm.sessionId || '?'),
     header: single ? single.header : 'Needs Input',
-    question: single ? single.question : '需要你回答',
+    question: single ? single.question : t('perm.askQuestion'),
     questions: qs, // [{ header, question, options:[{label,description}], multiSelect }]
     options: single ? single.options.map((o) => ({ label: o.label, desc: o.description })) : [],
     multi: false,
@@ -217,7 +226,7 @@ function buildContinueChoice(entry) {
     sessionId: entry.id,
     project: projectName(entry),
     header: '',
-    question: entry.assistantLastOutput ? clip(entry.assistantLastOutput, 120) : `${who} 在等你回复`,
+    question: entry.assistantLastOutput ? clip(entry.assistantLastOutput, 120) : t('perm.continueQuestion', { who }),
     options: [],
     multi: false,
     allowInput: false,
@@ -265,19 +274,19 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     const perm = permsBySession.get(e.id);
     if (perm && perm.isElicitation && !e.headless) {
       state = 'needsinput';
-      reason = '回复';
+      reason = 'reply';
       choice = buildElicitationChoice(perm, e);
     } else if (perm && perm.toolName === 'ExitPlanMode' && !e.headless) {
       state = 'needsinput';
-      reason = '审方案';
+      reason = 'plan';
       choice = buildPlanChoice(perm, e);
     } else if (perm && !e.headless) {
       state = 'waiting';
-      reason = '授权';
+      reason = 'perm';
       choice = buildPermChoice(perm, e);
     } else if (e.state === 'notification' && !e.headless) {
       state = 'needsinput';
-      reason = '回复';
+      reason = 'reply';
       choice = buildContinueChoice(e);
     }
 
@@ -451,7 +460,7 @@ function activityToEvents(act) {
       out.push({
         kind: 'needsinput',
         project,
-        reason: '回复',
+        reason: 'reply',
         sessionId: session.id,
         choice: buildContinueChoice({ ...session, id: session.id }),
         ts: Date.now(),

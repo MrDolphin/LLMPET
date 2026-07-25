@@ -173,6 +173,12 @@ const isInteracting = () => askActive && (askHover || document.activeElement ===
 
 // 把 UI 决策写日志，便于自检；双宠模式给 tag 带上身份前缀（claude:state / codex:state）
 const rlog = (tag, msg) => { try { window.pet.petLog((AGENT === 'all' ? '' : AGENT + ':') + tag, msg); } catch {} };
+// i18n: shared/i18n.js is loaded as a <script> before this file.
+const t = (key, vars) => window.OctoI18n.t(key, vars);
+// A reason arrives as a stable key ('reply'|'plan'|'perm'); older payloads may
+// still carry free text, so fall back to whatever came in.
+const waitPhrase = (reason) => (reason ? t('wait.' + reason) : t('wait.default'));
+const reasonWord = (reason) => (reason ? t('reason.' + reason) : t('reason.default'));
 const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // 带上 sessionId：否则同一项目下两个并行会话若问了同样的问题，会共用一个 key，
 // 答掉一个就把另一个也标记成 answered 吞掉。choice 各构造处都带 sessionId。
@@ -322,12 +328,12 @@ function renderElicitation(c) {
   askLabel.textContent = 'Needs Input';
   const qs = elic.questions;
   const q = qs[elic.qIdx] ||
-    { question: c.question || '需要你回答', options: (c.options || []).map((o) => ({ label: o.label, description: o.desc })) };
+    { question: c.question || t('ask.needAnswer'), options: (c.options || []).map((o) => ({ label: o.label, description: o.desc })) };
   askQhead.textContent = q.header || '';
   askQ.textContent = q.question || '';
   const multi = !!q.multiSelect;
   elic.multi = multi;
-  askHint.textContent = multi ? '可多选（点选多个）' : 'Choose one option';
+  askHint.textContent = multi ? t('ask.multiHint') : t('ask.singleHint');
 
   const prior = elic.answers[q.question];
   const opts = q.options || [];
@@ -407,8 +413,8 @@ let emptyWarnTimer = null;
 function warnEmptyInput() {
   askText.focus();
   askText.classList.add('warn');
-  if (!askText.dataset.ph) askText.dataset.ph = askText.placeholder || '输入自定义回答…';
-  askText.placeholder = '⚠️ 还没输入内容，是不是忘了填？';
+  if (!askText.dataset.ph) askText.dataset.ph = askText.placeholder || t('ask.placeholder');
+  askText.placeholder = t('ask.emptyWarn');
   clearTimeout(emptyWarnTimer);
   emptyWarnTimer = setTimeout(() => {
     askText.classList.remove('warn');
@@ -433,7 +439,7 @@ function elicNextOrSubmit(c) {
   if (elic.qIdx < (qs.length || 1) - 1) { elic.qIdx++; renderElicitation(c); return; }
   window.pet.decidePermission(c.permId, { type: 'elicitation-submit', answers: { ...elic.answers } });
   rlog('ask', 'elicitation submit ' + Object.keys(elic.answers).length);
-  finishChoice(c, '✅ 已提交回答');
+  finishChoice(c, t('ask.submitted'));
 }
 
 function elicBack(c) {
@@ -443,9 +449,9 @@ function elicBack(c) {
 // ② 授权：允许(绿)/拒绝(红) + 可选「始终允许」建议按钮(中性)
 function renderPerm(c) {
   clearAskBody();
-  askLabel.textContent = '需要授权';
+  askLabel.textContent = t('ask.needPerm');
   askQhead.textContent = c.header || '';
-  askQ.textContent = c.question || '需要你授权';
+  askQ.textContent = c.question || t('ask.needPermQ');
   const opts = c.options || [];
   if (opts.length === 2) askOpts.classList.add('perm-row'); // 仅允许/拒绝时并排
   opts.forEach((opt) => {
@@ -464,7 +470,7 @@ function renderPerm(c) {
 function renderContinue(c) {
   clearAskBody();
   askLabel.textContent = 'Needs Input';
-  askQ.textContent = c.question || 'Claude 在等你回复';
+  askQ.textContent = c.question || t('ask.waitingReply');
   askFoot.classList.add('hidden');
   askTerm.classList.remove('hidden');
 }
@@ -472,24 +478,24 @@ function renderContinue(c) {
 // ④ ExitPlanMode 方案评审：展示方案 + 批准 / 打回并反馈
 function renderPlan(c) {
   clearAskBody();
-  askLabel.textContent = '方案评审';
+  askLabel.textContent = t('ask.planLabel');
   askQhead.textContent = c.project ? '📂 ' + c.project : '';
-  askQ.textContent = c.question || '请审阅这个方案';
+  askQ.textContent = c.question || t('ask.planQ');
   const approve = document.createElement('button');
   approve.className = 'ask-opt act allow';
-  approve.innerHTML = '<span class="ask-ot"><span class="ask-ol">✅ 批准方案</span></span>';
-  approve.addEventListener('click', () => submitPerm('allow', c, '✅ 已批准方案'));
+  approve.innerHTML = '<span class="ask-ot"><span class="ask-ol">' + esc(t('ask.approve')) + '</span></span>';
+  approve.addEventListener('click', () => submitPerm('allow', c, t('ask.approved')));
   askOpts.appendChild(approve);
   const reject = document.createElement('button');
   reject.className = 'ask-opt act deny';
-  reject.innerHTML = '<span class="ask-ot"><span class="ask-ol">✏️ 打回并反馈</span></span>';
+  reject.innerHTML = '<span class="ask-ot"><span class="ask-ol">' + esc(t('ask.reject')) + '</span></span>';
   reject.addEventListener('click', () => {
     window.pet.decidePermission(c.permId, { type: 'plan-feedback', feedback: (askText.value || '').trim() });
-    finishChoice(c, '✏️ 已打回方案');
+    finishChoice(c, t('ask.rejected'));
   });
   askOpts.appendChild(reject);
   askInputRow.classList.remove('hidden');
-  askText.placeholder = '可写修改意见，打回让 Claude 改…';
+  askText.placeholder = t('ask.rejectPlaceholder');
   askFoot.classList.add('hidden');
   askTerm.classList.remove('hidden');
 }
@@ -509,14 +515,14 @@ function finishChoice(choice, bubbleMsg) {
 }
 function submitPerm(key, choice, label) {
   window.pet.decidePermission(choice.permId, key);
-  const msg = key === 'allow' ? '✅ 已允许' : key === 'deny' ? '⛔ 已拒绝' : '🔓 已记住（始终允许）';
+  const msg = key === 'allow' ? t('ask.allowed') : key === 'deny' ? t('ask.denied') : t('ask.remembered');
   finishChoice(choice, msg);
 }
 // Go to Terminal：去会话终端自己答（授权/elicitation 都回 deny，让 CC 在终端重问）
 function gotoSession(choice) {
   if (choice.permId) window.pet.decidePermission(choice.permId, 'deny');
   window.pet.focusSession(choice.sessionId || '');
-  finishChoice(choice, '💬 已带你去终端');
+  finishChoice(choice, t('ask.toTerminal'));
 }
 
 function hideAsk() {
@@ -573,7 +579,7 @@ function updateNotepad(s) {
 function renderTodoPop() {
   const acts = actionableItems();
   const done = curTodos.filter((t) => t.status === 'completed').length;
-  tpProg.textContent = curTodos.length ? `待办 ${done}/${curTodos.length}` : '';
+  tpProg.textContent = curTodos.length ? t('todo.progress', { done, total: curTodos.length }) : '';
   // 需要你处理
   if (acts.length) {
     tpActSec.classList.remove('hidden');
@@ -602,14 +608,14 @@ function renderTodoPop() {
 function buildActCard(c) {
   const card = document.createElement('div');
   card.className = 'tp-act';
-  const kindTag = c.kind === 'perm' ? '授权' : c.kind === 'continue' ? '回复' : c.kind === 'plan' ? '方案' : '选择';
+  const kindTag = c.kind === 'perm' ? t('ask.kindPerm') : c.kind === 'continue' ? t('ask.kindContinue') : c.kind === 'plan' ? t('ask.kindPlan') : t('ask.kindChoice');
   const head = document.createElement('div');
   head.className = 'tp-act-proj';
   head.textContent = `📂 ${c.project || '?'} · ${kindTag}`;
   card.appendChild(head);
   const q = document.createElement('div');
   q.className = 'tp-act-q';
-  q.textContent = (c.header ? '【' + c.header + '】 ' : '') + (c.question || '需要你处理');
+  q.textContent = (c.header ? '【' + c.header + '】 ' : '') + (c.question || t('ask.needHandling'));
   card.appendChild(q);
 
   const opts = document.createElement('div');
@@ -636,7 +642,7 @@ function buildActCard(c) {
     });
     const go = document.createElement('button');
     go.className = 'tp-act-go';
-    go.textContent = '💬 去这个会话回复 →';
+    go.textContent = t('ask.goReply');
     go.addEventListener('click', (e) => { e.stopPropagation(); popGoto(c); });
     opts.appendChild(go);
   }
@@ -694,12 +700,23 @@ const CODEX_ICON =
   '<path d="M7 8l4 4-4 4" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
   '<path d="M13 16.5h4.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>';
 const agentIcon = (s) => (s && s.agent === 'codex' ? CODEX_ICON : CLAUDE_ICON);
-const SESS_META = {
-  waiting: '✋ 等你授权', needsinput: '💬 等你回复',
-  working: '⚙️ 干活中', juggling: '🤹 并行子任务', sweeping: '🧹 清理上下文',
-  thinking: '💭 思考中', loafing: '🍦 摸鱼中(等下一步)', error: '😵 出错了',
-  idle: '空闲', sleeping: '💤 休息中',
+// State → HUD label. Resolved per call (not a frozen table) so switching the
+// language re-labels every row on the next render.
+const SESS_META_ICON = {
+  waiting: '✋ ', needsinput: '💬 ', working: '⚙️ ', juggling: '🤹 ',
+  sweeping: '🧹 ', thinking: '💭 ', loafing: '🍦 ', error: '😵 ',
+  idle: '', sleeping: '💤 ',
 };
+const SESS_META_KEY = {
+  waiting: 'state.waiting', needsinput: 'state.needsinput', working: 'state.working',
+  juggling: 'state.juggling', sweeping: 'state.sweeping', thinking: 'state.thinking',
+  loafing: 'state.loafingLong', error: 'state.error', idle: 'state.idle',
+  sleeping: 'state.sleeping',
+};
+function sessMeta(state) {
+  const key = SESS_META_KEY[state];
+  return key ? (SESS_META_ICON[state] || '') + t(key) : null;
+}
 const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2, sweeping: 2, thinking: 2, loafing: 3, idle: 4, sleeping: 5 };
 
 // 对齐参考项目阈值：≥90% 红(hot)、≥75% 黄(warm)、其余灰
@@ -727,12 +744,12 @@ function visibleSessions() {
 
 function renderSessList() {
   const list = visibleSessions();
-  slSub.textContent = list.length ? `${list.length} 个` : '';
+  slSub.textContent = list.length ? t('sess.count', { n: list.length }) : '';
   slRows.innerHTML = '';
   if (!list.length) {
     const e = document.createElement('div');
     e.className = 'sl-empty';
-    e.textContent = '暂无活跃会话 — 点下面新开一个';
+    e.textContent = t('sess.empty');
     slRows.appendChild(e);
     return;
   }
@@ -742,11 +759,13 @@ function renderSessList() {
     const attn = s.state === 'waiting' || s.state === 'needsinput';
     // meta：等待类显示「等你…」；忙碌显示当前操作；其余只显示状态（不要把陈旧 op 显示成"处理中"）
     let meta;
-    if (attn) meta = s.reason ? (s.state === 'waiting' ? '✋ 等你' + s.reason : '💬 等你' + s.reason) : SESS_META[s.state];
-    else if (s.state === 'working' || s.state === 'juggling' || s.state === 'sweeping' || s.state === 'thinking') meta = s.op || SESS_META[s.state];
-    else if (s.badge === 'done') meta = '✅ 刚完成';
-    else if (s.badge === 'interrupted') meta = '⚠️ 中断';
-    else meta = SESS_META[s.state] || s.state;
+    if (attn) meta = s.reason
+      ? t(s.state === 'waiting' ? 'sess.waitFor' : 'sess.replyFor', { reason: reasonWord(s.reason) })
+      : sessMeta(s.state);
+    else if (s.state === 'working' || s.state === 'juggling' || s.state === 'sweeping' || s.state === 'thinking') meta = s.op || sessMeta(s.state);
+    else if (s.badge === 'done') meta = t('sess.justDone');
+    else if (s.badge === 'interrupted') meta = t('sess.interrupted');
+    else meta = sessMeta(s.state) || s.state;
     const dotCls = sessionDotClass(s); // 与头顶小点同一套配色
     const ctx = typeof s.contextPercent === 'number'
       ? `<span class="sl-ctx ${ctxClass(s.contextPercent)}">${s.contextPercent}%</span>` : '';
@@ -756,7 +775,7 @@ function renderSessList() {
       `<div class="sl-main"><div class="sl-name">${esc(s.project)}</div>` +
       `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
       ctx +
-      `<button class="sl-meme-entry" title="给这个 session 发一个表情包">🎭 表情包</button>`;
+      `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>`;
     const memeBtn = row.querySelector('.sl-meme-entry');
     memeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -791,11 +810,11 @@ async function openMemePage(session) {
   slSessionView.classList.add('hidden');
   slMemeView.classList.remove('hidden');
   slBack.classList.remove('hidden');
-  slTitle.textContent = '🎭 选择表情包';
+  slTitle.textContent = t('meme.pickTitle');
   slSub.textContent = '';
   slMemeSession.textContent = `${session.agent === 'codex' ? 'Codex' : 'Claude'} · ${session.project}`;
   slMemeGrid.innerHTML = '';
-  setMemeStatus('正在读取表情包…');
+  setMemeStatus(t('meme.loading'));
   await loadMemeCatalog();
   if (!memeTarget || memeTarget.sessionId !== session.sessionId) return;
   slMemeGrid.innerHTML = '';
@@ -809,27 +828,27 @@ async function openMemePage(session) {
     card.addEventListener('click', async (e) => {
       e.stopPropagation();
       card.disabled = true;
-      setMemeStatus('正在投递到指定 session…');
+      setMemeStatus(t('meme.sending'));
       const target = memeTarget;
       closeSessList();
       let result;
       try {
         result = await window.pet.triggerMeme(target.sessionId, meme.id);
       } catch (err) {
-        result = { ok: false, submitted: false, message: err && err.message ? err.message : '表情包执行失败' };
+        result = { ok: false, submitted: false, message: err && err.message ? err.message : t('meme.failed') };
       }
       card.disabled = false;
       if (result && result.ok) {
-        memeCaption.textContent = result.submitted ? `${meme.label} · Prompt 已直发` : `${meme.label} · Prompt 已复制`;
+        memeCaption.textContent = t(result.submitted ? 'meme.sent' : 'meme.copied', { label: meme.label });
       } else {
-        memeCaption.textContent = (result && result.message) || '表情包执行失败';
+        memeCaption.textContent = (result && result.message) || t('meme.failed');
         if (memePlayer.classList.contains('hidden')) showBubble(memeCaption.textContent, 3600, true);
       }
       rlog('meme', `${meme.id} target=${String(target.sessionId || '').slice(-6)} submitted=${!!(result && result.submitted)}`);
     });
     slMemeGrid.appendChild(card);
   }
-  setMemeStatus(memeCatalog.items.length ? '点击后会播放 GIF/语音，并把对应 Prompt 发给当前 session。' : '还没有可用表情包。');
+  setMemeStatus(memeCatalog.items.length ? t('meme.hint') : t('meme.none'));
   fitPopup(sesslist);
 }
 
@@ -838,7 +857,7 @@ function showSessionPage() {
   slMemeView.classList.add('hidden');
   slSessionView.classList.remove('hidden');
   slBack.classList.add('hidden');
-  slTitle.textContent = '🗂️ 会话';
+  slTitle.textContent = t('sess.title');
   renderSessList();
   fitPopup(sesslist);
 }
@@ -913,8 +932,8 @@ function playMeme(meme) {
   memeLayoutActive = true;
   currentMemePlacement = meme.media.placement === 'pet-left' ? 'pet-left' : 'pet-right';
   memeImage.src = `../assets/memes/${meme.media.gif}`;
-  memeImage.alt = meme.label || '表情包';
-  memeCaption.textContent = `${meme.label || '表情包'} · ${meme.project || ''}`;
+  memeImage.alt = meme.label || t('meme.fallbackLabel');
+  memeCaption.textContent = `${meme.label || t('meme.fallbackLabel')} · ${meme.project || ''}`;
   memePlayer.classList.remove('hidden');
   setRequestedPetSize(MEME_WINDOW_W, MEME_WINDOW_H);
   if (meme.reaction && meme.reaction.state) {
@@ -1247,26 +1266,26 @@ window.pet.onEvent((ev) => {
     case 'user-turn':
       // 你的输入里带情绪（loved/sad/excited）→ 章鱼即时反应；否则像以前一样进 thinking
       if (ev.emotion && state !== 'waiting') {
-        const tip = ev.emotion === 'loved' ? '🥰 谢谢夸奖！' : ev.emotion === 'sad' ? '😢 别生气…' : '✨ 收到！';
+        const tip = ev.emotion === 'loved' ? t('bub.loved') : ev.emotion === 'sad' ? t('bub.sad') : t('bub.ack');
         transient(ev.emotion, 2800, tip, 2600);
       } else {
         // 多会话时聚合里 working > thinking，直接 setState 会在下个快照被盖掉
         // （只闪 ~150ms）。用 transient 保证「刚提交任务」的思考表情至少停留一会。
         if (state !== 'waiting') transient('thinking', 3500);
-        showBubble('📨 收到新任务！', 2600);
+        showBubble(t('bub.newTask'), 2600);
       }
       break;
     case 'turn-done':
-      transient('happy', 1800, '✅ 这一轮搞定啦！', 3400);
+      transient('happy', 1800, t('bub.roundDone'), 3400);
       SOUND.done();
       break;
     case 'big-done':
-      transient('happy', 2200, `🎉 大任务搞定！(${ev.ops || ''}步)`, 3800);
+      transient('happy', 2200, t('bub.bigDone', { ops: ev.ops || '' }), 3800);
       confetti();
       SOUND.bigDone();
       break;
     case 'error':
-      transient('error', 2600, ev.text || '😵 出了点状况，在想办法…', 3000);
+      transient('error', 2600, ev.text || t('bub.error'), 3000);
       SOUND.error();
       break;
     case 'waiting':
@@ -1276,7 +1295,7 @@ window.pet.onEvent((ev) => {
       if (ev.choice && ((ev.choice.options && ev.choice.options.length) || ev.choice.allowInput)) {
         enqueueChoice(ev.choice); // 直接弹出选项/输入
       } else {
-        showBubble(`✋ ${ev.project || ''} 等你${ev.reason || '处理'}`, 6000);
+        showBubble(t('bub.waitYou', { project: ev.project || '', wait: waitPhrase(ev.reason) }), 6000);
       }
       break;
     case 'needsinput':
@@ -1286,67 +1305,67 @@ window.pet.onEvent((ev) => {
       if (ev.choice && ((ev.choice.options && ev.choice.options.length) || ev.choice.allowInput)) {
         enqueueChoice(ev.choice);
       } else {
-        showBubble(`💬 ${ev.project || ''} 等你回复`, 6000);
+        showBubble(t('bub.needReply', { project: ev.project || '' }), 6000);
       }
       break;
     case 'greet':
-      transient('greet', 2000, `👋 ${ev.project || ''} 新会话，你好！`, 2600);
+      transient('greet', 2000, t('bub.greet', { project: ev.project || '' }), 2600);
       SOUND.greet();
       break;
     case 'longcmd':
-      if (state !== 'waiting') showBubble('💦 这条命令有点久，稍等…', 3000);
+      if (state !== 'waiting') showBubble(t('bub.slowCmd'), 3000);
       break;
     case 'territory':
       // 领地模式(main 的 territory 编排):发现别的桌宠 → 走过去顶到屏幕边上。
       // 全程复用现成情绪态,窗口走位由主进程完成,这里只负责表情/气泡/音效。
       switch (ev.phase) {
         case 'spotted':
-          transient('puzzled', 2400, `👀 咦？「${ev.rival || '不明生物'}」闯进我的地盘！`, 2600);
+          transient('puzzled', 2400, t('terr.spotted', { rival: ev.rival || t('terr.unknownRival') }), 2600);
           SOUND.waiting();
           break;
         case 'march':
           // 推挤最长十几秒,给个长时限的斗志表情,victory/defeat 到了自然接管
-          transient('excited', 16000, '🥊 走开走开！这是我的桌面！', 3200);
+          transient('excited', 16000, t('terr.shove'), 3200);
           break;
         case 'victory':
-          transient('happy', 2800, '🏆 哼！把它顶到墙边啦～', 3400);
+          transient('happy', 2800, t('terr.won'), 3400);
           confetti();
           SOUND.bigDone();
           break;
         case 'defeat':
-          transient('sad', 3000, `😤 「${ev.rival || '它'}」纹丝不动…算它狠！`, 3200);
+          transient('sad', 3000, t('terr.stuck', { rival: ev.rival || t('terr.itPronoun') }), 3200);
           SOUND.error();
           break;
         case 'partial':
-          transient('excited', 3200, `💨 已经把「${ev.rival || '它'}」推到系统允许的最边上啦！`, 3600);
+          transient('excited', 3200, t('terr.edge', { rival: ev.rival || t('terr.itPronoun') }), 3600);
           SOUND.done();
           break;
         case 'ontop':
           // 猫爪在上定律:发现别的桌宠进程,窗口层级已被主进程抬到最上
-          transient('excited', 2600, `🐾 猫爪在上定律！「${ev.rival || '入侵者'}」不许压着我～`, 3000);
+          transient('excited', 2600, t('terr.onTop', { rival: ev.rival || t('terr.intruder') }), 3000);
           SOUND.greet();
           break;
         case 'noperm':
-          showBubble('🔒 想把入侵者顶走，但还没有「辅助功能」权限（系统设置 → 隐私与安全性 → 辅助功能）', 7000);
+          showBubble(t('terr.noPerm'), 7000);
           break;
         case 'granted':
           // 用户在设置里勾上「辅助功能」后主进程轮询到位，自动接着巡视——
           // 给个明确的成功反馈，闭合"点开设置→授权→开跑"这条链。
-          transient('happy', 2800, '🎉 辅助功能已授权，这就去巡视地盘！', 3400);
+          transient('happy', 2800, t('terr.granted'), 3400);
           SOUND.greet();
           break;
         case 'searching':
-          showBubble('🔎 正在巡视桌面，找找有没有别的桌宠…', 2400);
+          showBubble(t('terr.scanning'), 2400);
           break;
         case 'clear':
-          showBubble('✨ 巡视完毕，地盘很安静～', 2600);
+          showBubble(t('terr.clear'), 2600);
           break;
         case 'busy':
-          showBubble('🔎 正在巡视中，等我处理完这只桌宠！', 2600);
+          showBubble(t('terr.busy'), 2600);
           break;
         case 'blocked':
           // 面板/菜单还在收口时没有真正执行窗口扫描，不能误报“地盘安静”。
-          showBubble('⏳ 界面操作结束后再巡视，避免打断你～', 2800);
+          showBubble(t('terr.deferred'), 2800);
           break;
         case 'abort':
           // 中途撤退(用户来了/弹层打开):静默收掉 march 的长斗志表情,
@@ -1374,9 +1393,10 @@ function applyStats(s) {
     const rl = s.codexLimits;
     chipCost.textContent = 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
     chipWindow.textContent = rl && rl.usedPercent != null
-      ? `5h 额度 ${Math.round(rl.usedPercent)}%` + (rl.secondaryUsedPercent != null ? ` · 周 ${Math.round(rl.secondaryUsedPercent)}%` : '')
-      : '额度 --';
-    chipWindow.title = 'Codex 套餐窗口用量（来自 rollout 的 rate_limits）';
+      ? t('chip.quota', { pct: Math.round(rl.usedPercent) })
+        + (rl.secondaryUsedPercent != null ? t('chip.weekly', { pct: Math.round(rl.secondaryUsedPercent) }) : '')
+      : t('chip.quotaNone');
+    chipWindow.title = t('chip.codexTitle');
   } else {
     chipCost.textContent = '$' + (s.today.cost || 0).toFixed(3);
     chipWindow.textContent = '5h $' + (s.window5h.cost || 0).toFixed(3);
@@ -1439,7 +1459,7 @@ function renderSessions(sessions) {
   for (const s of list) {
     const d = document.createElement('div');
     d.className = 'sess-dot ' + sessionDotClass(s);
-    const label = s.state === 'waiting' ? `等你${s.reason || '处理'}` : (SESS_META[s.state] || s.state);
+    const label = s.state === 'waiting' ? waitPhrase(s.reason) : (sessMeta(s.state) || s.state);
     d.title = `${s.project} · ${label}`;
     sessionsEl.appendChild(d);
   }
@@ -1451,8 +1471,38 @@ window.pet.onConfig((cfg) => {
   if (!cfg) return;
   muted = !!cfg.muted;
   territorySupported = !!cfg.territorySupported;
+  if (cfg.lang) applyLang(cfg.lang);
   if (cfg.skin) applySkin(cfg.skin);
 });
+
+// Static markup carries its Chinese text inline (so the window is never blank
+// before the first config push); data-i18n rewrites it once the language is
+// known and again on every switch.
+function applyStaticI18n() {
+  document.documentElement.lang = window.OctoI18n.getLang();
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) {
+    el.placeholder = t(el.dataset.i18nPh);
+    delete el.dataset.ph; // drop the cached original so the warn/restore pair re-seeds
+  }
+}
+
+function applyLang(next) {
+  if (next === window.OctoI18n.getLang()) return;
+  window.OctoI18n.setLang(next);
+  applyStaticI18n();
+  // refreshAsk() skips a re-render while the queue signature is unchanged; drop
+  // the signature so an open card is relabelled instead of sitting in the old
+  // language until its content happens to change.
+  lastAskSig = '';
+  // Live views rebuild from the state we already hold; everything else refreshes
+  // on the stats push the main process fires right after the switch.
+  if (sessListOpen) { if (memeTarget) openMemePage(memeTarget); else renderSessList(); }
+  if (todoPopOpen) renderTodoPop();
+  if (radialOpen) buildRadial();
+  if (lastStats) applyStats(lastStats);
+}
 
 function applySkin(s) {
   skin = ['pixel', 'mascot', 'cat'].includes(s) ? s : 'mascot';
@@ -1544,7 +1594,9 @@ document.getElementById('sl-close').addEventListener('click', (e) => { e.stopPro
 slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
 const slNewBtn = document.getElementById('sl-new');
 const slNewCodexBtn = document.getElementById('sl-new-codex');
-if (AGENT === 'codex') slNewBtn.textContent = '🛰️ 新开 Codex';
+// Rebind the key rather than the text: applyStaticI18n() re-reads data-i18n on
+// every language switch, so the Codex pet keeps its own label.
+if (AGENT === 'codex') slNewBtn.dataset.i18n = 'sess.newCodex';
 else if (AGENT === 'all' && slNewCodexBtn) slNewCodexBtn.classList.remove('hidden'); // 单宠双后端：两个都能开
 slNewBtn.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -1567,19 +1619,21 @@ todopop.querySelectorAll('.tp-ops button').forEach((b) => {
 
 // ---------- 泡泡菜单 ----------
 let territorySupported = false; // 由 pet:config 下发(仅 macOS true)
+// labelKey (not label): buildRadial resolves it at render time, so the menu
+// follows a language switch without rebuilding this table.
 const MENU = [
-  { ic: 'chart',  label: '详情', act: () => window.pet.openPanel() },
-  { ic: 'mask',   label: '形象', act: () => toggleSkin() },
-  { ic: 'hand',   label: '待处理', badge: true, act: () => window.pet.openPanel() },
-  { ic: 'zombie', label: '后台', badgeBg: true, act: () => window.pet.openPanel() },
-  { ic: 'doc',    label: '日志', act: () => window.pet.openLog() },
-  { ic: 'search', label: '巡视', when: () => territorySupported, act: () => window.pet.territoryRunNow() },
-  { ic: 'bell',   label: '静音', act: () => window.pet.toggleMute() },
+  { ic: 'chart',  labelKey: 'menu.panel', act: () => window.pet.openPanel() },
+  { ic: 'mask',   labelKey: 'menu.skin', act: () => toggleSkin() },
+  { ic: 'hand',   labelKey: 'menu.pending', badge: true, act: () => window.pet.openPanel() },
+  { ic: 'zombie', labelKey: 'menu.background', badgeBg: true, act: () => window.pet.openPanel() },
+  { ic: 'doc',    labelKey: 'menu.log', act: () => window.pet.openLog() },
+  { ic: 'search', labelKey: 'menu.patrol', when: () => territorySupported, act: () => window.pet.territoryRunNow() },
+  { ic: 'bell',   labelKey: 'menu.mute', act: () => window.pet.toggleMute() },
   // 双宠模式下「退出」只收起自己这只（独立事件，另一只照常干活）；
   // 整个 app 的退出走托盘。单宠模式保持原语义：退出 app。
   AGENT === 'all'
-    ? { ic: 'power', label: '退出', act: () => window.pet.quit() }
-    : { ic: 'power', label: '收起', act: () => window.pet.closePet() },
+    ? { ic: 'power', labelKey: 'menu.quit', act: () => window.pet.quit() }
+    : { ic: 'power', labelKey: 'menu.collapse', act: () => window.pet.closePet() },
 ];
 
 function toggleSkin() {
@@ -1609,9 +1663,11 @@ function buildRadial() {
     b.style.left = x + 'px';
     b.style.top = y + 'px';
     b.style.transitionDelay = i * 0.03 + 's';
-    const icName = it.label === '静音' ? (muted ? 'bell-off' : 'bell') : it.ic;
+    // Key, not label: the old `it.label === '静音'` test silently picked the
+    // wrong bell icon under any non-Chinese UI.
+    const icName = it.labelKey === 'menu.mute' ? (muted ? 'bell-off' : 'bell') : it.ic;
     const icHtml = (window.OctoIcons && window.OctoIcons.icon(icName)) || '';
-    b.innerHTML = `<span class="ri-ic oi">${icHtml}</span><span class="ri-lb">${it.label}</span>`;
+    b.innerHTML = `<span class="ri-ic oi">${icHtml}</span><span class="ri-lb">${esc(t(it.labelKey))}</span>`;
     const cnt = it.badge ? lastWaiting : it.badgeBg ? lastBgZombie : 0;
     if ((it.badge || it.badgeBg) && cnt > 0) {
       const bd = document.createElement('span');
@@ -1676,14 +1732,17 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   // 记事本弹层的唤起按钮跟着 agent 走
   if (AGENT === 'codex') {
     const b = todopop.querySelector('.tp-ops button[data-op="claude"]');
-    if (b) b.textContent = '🛰️ 唤起 Codex';
+    // Rebind the key so applyStaticI18n() keeps relabelling it as Codex.
+    if (b) b.dataset.i18n = 'tray.launchCodex';
   }
   const cfg = await window.pet.getConfig();
   if (cfg) {
     muted = !!cfg.muted;
     territorySupported = !!cfg.territorySupported;
+    window.OctoI18n.setLang(cfg.lang || 'zh');
     applySkin(cfg.skin || 'mascot');
   }
+  applyStaticI18n();
   await loadMemeCatalog();
   const s = await window.pet.getStats();
   // 有快照就按真实聚合态亮相；之前无条件 setState('idle') 会把刚算出的
@@ -1692,9 +1751,9 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
   if (s) applyStats(s);
   else if (!lastStats) setState('idle');
   showBubble(
-    AGENT === 'codex' ? '🛰️ 小章鱼上线，盯 Codex 任务啦！'
-      : AGENT === 'claude' ? '🐙 小章鱼上线，盯 Claude 任务啦！'
-      : '🐙 小章鱼上线，开始盯任务啦！',
+    AGENT === 'codex' ? t('bub.onlineCodex')
+      : AGENT === 'claude' ? t('bub.onlineClaude')
+      : t('bub.online'),
     3000,
   );
   if (DEBUG_CONFETTI) setInterval(() => confetti(), 2500);

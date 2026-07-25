@@ -4,6 +4,8 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
+const i18n = require('../shared/i18n');
+
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const pkg = JSON.parse(read('package.json'));
@@ -32,7 +34,14 @@ assert(/LLMPET \$\{GITHUB_REF_NAME#v\}/.test(read('.github/workflows/release.yml
 assert.strictEqual(lock.name, 'llmpet');
 assert.strictEqual(lock.packages[''].name, 'llmpet');
 assert(/app\.setName\('LLMPET'\)/.test(main), 'Electron app name must use the public brand');
-assert(/tray\.setToolTip\('LLMPET — Claude Code \/ Codex 桌宠'\)/.test(main), 'tray tooltip must use LLMPET and name both supported backends');
+// The tooltip moved into the i18n dictionary — assert the string itself in every
+// locale rather than one hard-coded literal in main.js.
+assert(/tray\.setToolTip\(t\('tray\.tooltip'\)\)/.test(main), 'tray tooltip must come from the i18n dictionary');
+for (const lang of i18n.LANGS) {
+  const tip = i18n.DICT[lang]['tray.tooltip'];
+  assert(/LLMPET/.test(tip) && /Claude Code/.test(tip) && /Codex/.test(tip),
+    `${lang} tray tooltip must use LLMPET and name both supported backends`);
+}
 assert(/<title>LLMPET · 详情<\/title>/.test(read('renderer/panel.html')), 'detail window title must use LLMPET');
 assert(/LLMPET_NO_CODEX/.test(main) && /LLMPET_CODEX_DIR/.test(main), 'new Codex controls must use the LLMPET namespace');
 assert(!/OCTOPUS_(?:NO_CODEX|CODEX_DIR)/.test(main), 'new Codex controls must not reintroduce the retired namespace');

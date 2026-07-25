@@ -233,7 +233,7 @@ async function main() {
   assert(!css.includes('left: calc(50% + 112px)'), 'meme position must follow the real pet rect');
   assert(css.includes('#sl-session-view.hidden'), 'meme page must fully hide the session list view');
 
-  const world = loadRenderer(['shared/states.js', 'renderer/pet.js']);
+  const world = loadRenderer(['shared/i18n.js', 'shared/states.js', 'renderer/pet.js']);
   assert.strictEqual(typeof world.handlers.meme, 'function');
   world.handlers.config({ skin: 'cat', muted: true });
   world.handlers.meme({

@@ -124,6 +124,13 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - `npm test` —— 无头端到端冒烟测试（hook→server→core→adapter、权限持开→decide 字节级响应）。
 - 日志：`~/.octopus/octopus.log`。
 
+### 界面语言（简体中文 / English / 日本語）
+托盘「⚙️ 设置 → 🌐 语言 / Language」即时切换，无需重启：托盘、桌宠气泡、会话列表、详情面板和表情包文案同时跟着变，选择存在 `~/.octopus/config.json` 的 `lang`（默认 `zh`）。
+
+英日版**不是逐字翻译**——桌宠的语气建立在中文梗上，直译过去梗就没了。所以每种语言取的是**功能对等的本地梗**，比如「你这瓜保熟吗？」（华强买瓜，逼你验货别糊弄）在英文里是 *"Source: trust me bro?"*，日文里是「それってあなたの感想ですよね？」。表情包下发给 Claude / Codex 的 Prompt 也跟着切语言，英文界面不会突然甩一段中文进会话。
+
+> 表情包的 GIF 素材本身带中文字幕（如月薪喵皮肤的「熬夜冠军」），换语言不会改图 —— 那要重做素材。
+
 ### 计量 / 计费
 - 数据源：本机 `~/.claude/projects/**/*.jsonl`（只读 token 数 / 模型 / 时间戳，**不读内容**）。
 - 状态持久化：`~/.octopus/usage.json`（含 90 天日历、游标）。首次启动会回填近 95 天历史。
@@ -166,7 +173,11 @@ backend/
   focus.js              定位会话（mac 优先）
   territory.js          领地模式（扫描别的桌宠 + 推窗驱逐战编排）
   config.js  log.js     配置持久化 / 日志
+shared/
+  states.js             状态词表单一来源（主进程 / 渲染端 / 测试共用）
+  i18n.js               全部界面文案的单一来源（zh / en / ja，主进程与渲染端共用）
 test/smoke.js           端到端冒烟测试
+test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗真的本地化了）
 ```
 
 ---
