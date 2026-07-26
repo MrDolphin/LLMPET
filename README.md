@@ -1,5 +1,7 @@
 # 🐙 LLMPET — Claude Code / Codex 桌面宠物
 
+[简体中文](README.md) | [English](README_EN.md) | [日本語](README_JA.md)
+
 一个实时盯着 **Claude Code 和 OpenAI Codex** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
 > **现在可以直接下载使用：** 普通用户无需安装 Node.js 或执行命令，前往 [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) 下载最新的 macOS / Windows 版本即可。源码安装方式仍保留给开发和调试使用。
