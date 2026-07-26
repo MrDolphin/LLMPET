@@ -47,6 +47,11 @@ function validateItem(raw) {
   if (!raw || typeof raw !== 'object' || !ID_RE.test(raw.id || '')) {
     throw new Error('表情包 id 不合法');
   }
+  const itemDir = `${raw.id}/`;
+  if (!raw.media || typeof raw.media.gif !== 'string' || typeof raw.media.audio !== 'string'
+    || !raw.media.gif.startsWith(itemDir) || !raw.media.audio.startsWith(itemDir)) {
+    throw new Error(`${raw.id}: 媒体文件必须放在 assets/memes/${raw.id}/ 独立目录`);
+  }
   const gif = safeMediaPath(raw.media && raw.media.gif);
   const audio = safeMediaPath(raw.media && raw.media.audio);
   const prompt = raw.prompt && raw.prompt.text;

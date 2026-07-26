@@ -1,6 +1,6 @@
 {
   "name": "llmpet",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "桌面宠物：实时呈现 Claude Code 与 OpenAI Codex 的状态、消息、用量和 Claude 授权",
   "main": "main.js",
   "license": "MIT",
@@ -32,7 +32,10 @@
       "hook/**"
     ],
     "win": {
-      "target": ["nsis", "zip"],
+      "target": [
+        "nsis",
+        "zip"
+      ],
       "icon": "assets/icon.ico",
       "artifactName": "LLMPET-${version}-Windows-${arch}.${ext}"
     },

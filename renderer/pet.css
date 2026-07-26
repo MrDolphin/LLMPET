@@ -652,6 +652,7 @@ body.skin-cat #cat { display: flex; }
 .sesslist {
   position: absolute; top: 14px; left: 12px; right: 12px;
   max-height: calc(100vh - 70px); z-index: 30; -webkit-app-region: no-drag;
+  overflow: hidden;
   background: rgba(38, 38, 43, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 16px;
@@ -674,7 +675,23 @@ body.skin-cat #cat { display: flex; }
 }
 .sl-back:hover { background: rgba(255, 255, 255, 0.15); }
 .sl-back.hidden { display: none; }
-.sl-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+#sl-session-view {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+.sl-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .sl-scroll::-webkit-scrollbar { width: 7px; }
 .sl-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
 
@@ -712,11 +729,17 @@ body.skin-cat #cat { display: flex; }
 .sl-meme-entry:hover { border-color: rgba(217, 119, 87, 0.75); background: rgba(217, 119, 87, 0.18); }
 
 .sl-empty { text-align: center; color: #9a9aa0; font-size: 12px; padding: 18px 8px; }
-.sl-foot { display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.sl-foot { flex: 0 0 auto; display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .sl-foot button { flex: 1; font-size: 11.5px; font-weight: 600; color: #e8e8ec; background: rgba(255, 255, 255, 0.08);
   border: none; border-radius: 9px; padding: 7px 0; cursor: pointer; }
 .sl-foot button:hover { background: rgba(255, 255, 255, 0.16); }
 #sl-session-view.hidden { display: none; }
+.sl-meme-view {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
 .sl-meme-view.hidden { display: none; }
 .sl-meme-session {
   margin: 0 4px 8px; padding: 8px 10px; border-radius: 10px;
@@ -725,7 +748,9 @@ body.skin-cat #cat { display: flex; }
 }
 .sl-meme-grid {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
-  overflow-y: auto; padding: 1px 4px 4px;
+  min-height: 0; flex: 1 1 auto;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  scrollbar-width: thin; padding: 1px 4px 4px;
 }
 .sl-meme-card {
   min-width: 0; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;

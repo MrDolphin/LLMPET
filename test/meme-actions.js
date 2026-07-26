@@ -17,7 +17,13 @@ async function main() {
   const root = path.join(__dirname, '..');
   const catalog = loadCatalog();
   assert.strictEqual(catalog.schemaVersion, 1);
-  assert.strictEqual(catalog.items.length, 1);
+  assert.strictEqual(catalog.items.length, 2);
+  for (const item of catalog.items) {
+    assert(item.media.gif.startsWith(item.id + '/'), `${item.id}: gif must live in its own directory`);
+    assert(item.media.audio.startsWith(item.id + '/'), `${item.id}: audio must live in its own directory`);
+    assert(fs.existsSync(path.join(root, 'assets', 'memes', item.media.gif)));
+    assert(fs.existsSync(path.join(root, 'assets', 'memes', item.media.audio)));
+  }
   const meme = getMeme('huaqiang-guaranteed');
   assert(meme);
   assert(meme.prompt.text.includes('保熟'));
@@ -30,6 +36,16 @@ async function main() {
   assert.strictEqual(meme.reaction.durationMs, 2600);
   assert(!JSON.stringify(publicCatalog()).includes(meme.prompt.text), 'renderer catalog must not expose full prompts');
   assert.strictEqual(publicCatalog().items[0].reaction.state, 'sorry');
+
+  const niGanMa = getMeme('ni-gan-ma');
+  assert(niGanMa);
+  assert.strictEqual(niGanMa.prompt.text,
+    '你干嘛呀～我正专心弄一件事呢，你在旁边一通乱插——顺手改了别的文件，捎带提了一堆我没问的建议，还把话题带到别处去了。哎哟，你好烦。\n\n'
+    + '回来。只做我正在推的那一件事，别的全放下：无关的改动撤掉，没问的建议先憋着，我问了你再说。\n\n'
+    + '把那一件事做完做透，跑一遍给我看。中间别再打岔了。');
+  assert.strictEqual(niGanMa.reaction.state, 'puzzled');
+  assert.strictEqual(niGanMa.reaction.durationMs, 4400);
+  assert(!JSON.stringify(publicCatalog()).includes(niGanMa.prompt.text), 'renderer catalog must not expose the ni-gan-ma prompt');
 
   assert.deepStrictEqual(
     routeForSession({ tmuxSocket: '/tmp/tmux', tmuxClient: '%3' }, 'darwin'),

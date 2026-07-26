@@ -38,5 +38,15 @@ assert(/const POPUP_W = 520;/.test(js), 'popup window should provide more horizo
 assert(/const ASK_VIEWPORT_MAX_H = 520;/.test(js), 'ask measurement must use the same vertical cap');
 assert(/window\.innerWidth[^\n]*POPUP_W/.test(js), 'fitPopup must resize width before measuring content height');
 assert(/askScroll\.scrollTop\s*=\s*0/.test(js), 'switching questions or sessions must reset only the content scroll position');
+assert(/\.sesslist\s*\{[^}]*max-height\s*:\s*calc\(100vh - 70px\)[^}]*overflow\s*:\s*hidden\s*;/s.test(css),
+  'session popup shell must clip to the viewport instead of spilling across the desktop');
+assert(/#sl-session-view\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*display\s*:\s*flex\s*;[^}]*flex\s*:\s*1 1 auto\s*;/s.test(css),
+  'session page must be a shrinkable flex column');
+assert(/\.sl-scroll\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
+  'session rows must own vertical scrolling when the list exceeds the popup');
+assert(/\.sl-foot\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),
+  'session footer must remain fixed while rows scroll');
+assert(/\.sl-meme-grid\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
+  'meme choices must share the same bounded scrolling contract');
 
 console.log('popup style checks passed');
