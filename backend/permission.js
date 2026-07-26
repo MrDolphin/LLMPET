@@ -244,14 +244,20 @@ function createPermissions(options = {}) {
     return resolveEntry(entry, behavior === 'allow' ? 'allow' : 'deny');
   }
 
-  // When the user clearly answered in the terminal, sweep stale bubbles for that
-  // session, so we clear any stale bubbles still open for it.
+  // 会话明显已继续（用户在终端作答 / 新输入 / 会话结束）时，清掉该会话残留的
+  // 过期气泡。裁决必须是 no-decision（丢弃挂起的连接 → CC 回退到终端自己的权限
+  // 提示），不能是 deny：这些事件在同一 session_id 的并发活动里同样会触发——
+  // 后台 / 并行子代理每完成一个工具就发 PostToolUse，主会话的工具完成也会扫到
+  // 子代理正在等待的气泡。发 deny 会把真正还在等用户点击的请求直接拒掉（CC 端
+  // 显示 "Error: User answered in terminal"），逼 Claude 反复重试同一工具。
+  // no-decision 保留「清掉过期气泡」的本意，且从不替用户做决定：用户若真在终端
+  // 答过了，CC 早已关闭这条连接，丢弃即为无副作用的空操作。
   const SWEEP_EVENTS = new Set(['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit', 'SessionEnd']);
   function sweepForSessionEvent(sessionId, event) {
     if (!SWEEP_EVENTS.has(event)) return;
     for (const entry of [...pending.values()]) {
       if (entry.sessionId === sessionId) {
-        resolveEntry(entry, 'deny', 'User answered in terminal');
+        resolveEntry(entry, 'no-decision', 'User answered in terminal');
       }
     }
   }
