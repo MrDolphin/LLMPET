@@ -6,7 +6,18 @@ DIST="$ROOT/dist"
 APP="$DIST/LLMPET.app"
 VERSION="$(cd "$ROOT" && node -p "require('./package.json').version")"
 ARCH="$(node -p "process.arch")"
-ZIP="$DIST/LLMPET-$VERSION-mac-$ARCH.zip"
+SIGN_MODE="${LLMPET_MAC_SIGN_MODE:-release}"
+if [[ "$SIGN_MODE" == "release" ]]; then
+  ZIP="$DIST/LLMPET-$VERSION-mac-$ARCH.zip"
+  # Fail before doing expensive work. A public release must never silently
+  # fall back to an ad-hoc signature when Apple credentials are missing.
+  node "$ROOT/scripts/sign-notarize-mac.js" --check-env
+elif [[ "$SIGN_MODE" == "adhoc" ]]; then
+  ZIP="$DIST/LLMPET-$VERSION-mac-$ARCH-unsigned.zip"
+else
+  echo "Unknown LLMPET_MAC_SIGN_MODE: $SIGN_MODE (expected release or adhoc)" >&2
+  exit 2
+fi
 ELECTRON_APP="$ROOT/node_modules/electron/dist/Electron.app"
 RESOURCES="$APP/Contents/Resources"
 
@@ -47,14 +58,18 @@ if ! /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST" 2>/dev/null; th
   /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST"
 fi
 
-# 第一阶段正常深签 Electron 的全部嵌套 Framework/Helper；第二阶段只重签顶层
-# LLMPET 并写入稳定 designated requirement。不能把自定义 requirement 和
-# --deep 放在同一条命令里，否则它会错误套到所有 Electron 子组件上。
-codesign --force --deep --sign - "$APP"
-# ad-hoc 默认 requirement 是每次构建都变化的 CDHash，导致辅助功能列表虽然
-# 仍显示已勾选，新包却被 TCC 当成另一个应用。固定顶层 Bundle ID 后只需授权一次。
-codesign --force --sign - \
-  --requirements '=designated => identifier "com.octopus.pet"' "$APP"
+if [[ "$SIGN_MODE" == "release" ]]; then
+  # @electron/osx-sign signs nested Electron components in the required order,
+  # enables Hardened Runtime and uses a Developer ID Application identity.
+  # @electron/notarize then waits for Apple and staples the returned ticket.
+  node "$ROOT/scripts/sign-notarize-mac.js"
+else
+  # Local development only. The -unsigned filename prevents this artifact from
+  # matching the GitHub Release upload pattern.
+  codesign --force --deep --sign - "$APP"
+  codesign --force --sign - \
+    --requirements '=designated => identifier "com.octopus.pet"' "$APP"
+fi
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "$APP"

@@ -11,10 +11,14 @@
     "uninstall:hooks": "node backend/hookinstall.js --uninstall",
     "meter:rebuild": "node backend/meter-rebuild.js",
     "package:mac": "bash scripts/package-mac.sh",
+    "package:mac:dev": "LLMPET_MAC_SIGN_MODE=adhoc bash scripts/package-mac.sh",
+    "verify:mac": "bash scripts/verify-mac-release.sh",
     "package:win": "electron-builder --win --publish never",
-    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/meme-actions.js && node test/i18n.js && node test/popup-style.js && node test/branding.js"
+    "test": "node test/smoke.js && node test/state-smoke.js && node test/pricing.js && node test/territory.js && node test/codex-watch.js && node test/codex-integration.js && node test/meme-actions.js && node test/i18n.js && node test/popup-style.js && node test/branding.js && node test/mac-release.js"
   },
   "devDependencies": {
+    "@electron/notarize": "2.5.0",
+    "@electron/osx-sign": "1.3.3",
     "electron": "^33.2.0",
     "electron-builder": "^26.15.3"
   },
