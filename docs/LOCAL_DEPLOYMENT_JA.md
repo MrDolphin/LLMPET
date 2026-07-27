@@ -1,39 +1,16 @@
 # LLMPET をローカル環境へ導入する
 
-このガイドでは、Release 版のインストールと、ソースからの起動・パッケージ作成を説明します。
+このガイドでは、ソースからの起動・テストと、ローカル開発検証用パッケージの作成を説明します。
 
 ## 対応環境
 
-| プラットフォーム | Release | ソースから起動 |
+| プラットフォーム | ソースから起動 | 備考 |
 | --- | --- | --- |
-| macOS Apple Silicon | `LLMPET-*-mac-arm64.zip` | 対応 |
-| Windows x64 | `LLMPET-*-Windows-x64.exe` / `.zip` | 対応 |
-| Linux | なし | 正式対応していません |
+| macOS Apple Silicon | 対応 | パトロールモードは macOS のみ |
+| Windows x64 | 対応 | 一般的なターミナルのセッションフォーカスに対応 |
+| Linux | 正式対応していません | ウィンドウフォーカスは未実装 |
 
 Claude Code または OpenAI Codex をインストールし、少なくとも一度は利用しておく必要があります。
-
-## Release 版をインストール
-
-### macOS Apple Silicon
-
-1. [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) から `LLMPET-*-mac-arm64.zip` をダウンロードします。
-2. 展開した `LLMPET.app` を「アプリケーション」へ移動します。
-3. ターミナルで次を実行します。
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
-   open "/Applications/LLMPET.app"
-   ```
-
-現在の公開 macOS ビルドは、Apple Developer ID による署名と公証がまだ完了していません。ブラウザはダウンロードに `com.apple.quarantine` 属性を付けるため、Gatekeeper がアプリを「壊れている」または確認できないと表示する場合があります。1 行目は LLMPET だけからダウンロード隔離属性を削除し、2 行目で起動します。
-
-このリポジトリの公式 Releases から入手した LLMPET にだけ使用してください。この操作は Apple 公証ではなく、システム権限も付与しません。
-
-パトロールモードには、別途 `システム設定 → プライバシーとセキュリティ → アクセシビリティ` でユーザーの許可が必要です。許可後に LLMPET を再起動してください。
-
-### Windows x64
-
-[GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) から `.exe` インストーラーまたはポータブル `.zip` をダウンロードします。未署名ビルドについて SmartScreen が警告した場合は、公式 Release からのファイルであることを確認してから「詳細情報 → 実行」を選択してください。
 
 ## 初回起動
 
@@ -98,7 +75,7 @@ macOS のローカル ad-hoc 署名パッケージ：
 npm run package:mac:dev
 ```
 
-`dist/LLMPET.app` と `dist/LLMPET-<version>-mac-<arch>-unsigned.zip` が生成されます。別の Mac で受け取った場合は、前述の `xattr` コマンドが必要になることがあります。`npm run package:mac` は Apple Developer ID と公証資格情報を必須とする正式公開用の fail-closed 経路です。詳細は [macOS の署名と公証](MACOS_RELEASE.md) をご覧ください。
+`dist/LLMPET.app` と `dist/LLMPET-<version>-mac-<arch>-unsigned.zip` が生成されます。ad-hoc 署名パッケージはローカル開発検証専用で、公開配布用ではありません。`npm run package:mac` は Apple Developer ID と公証資格情報を必須とする正式公開用の fail-closed 経路です。詳細は [macOS の署名と公証](MACOS_RELEASE.md) をご覧ください。
 
 Windows x64：
 
@@ -108,9 +85,7 @@ npm run package:win
 
 NSIS インストーラーとポータブル ZIP は `dist/` に生成されます。
 
-## 更新とアンインストール
-
-macOS では LLMPET を終了し、`/Applications/LLMPET.app` を新版で置き換えます。公証前のビルドでは、再度 `xattr` と `open` を実行してください。`~/.octopus/` のユーザーデータは保持されますが、署名 ID が変わった場合は macOS がアクセシビリティ許可を再度求めることがあります。
+## アンインストール
 
 アンインストール前に、トレイまたはソースディレクトリから Claude hook を削除します。
 
@@ -118,10 +93,9 @@ macOS では LLMPET を終了し、`/Applications/LLMPET.app` を新版で置き
 npm run uninstall:hooks
 ```
 
-その後 LLMPET を終了して削除します。設定、利用履歴、ログも不要な場合に限り `~/.octopus/` を削除してください。
+その後 LLMPET を終了します。設定、利用履歴、ログも不要な場合に限り `~/.octopus/` を削除してください。
 
 ## トラブルシューティング
 
-- **macOS で「壊れている」と表示される：** 入手元とアプリの場所を確認し、記載した `xattr` と `open` を実行します。
-- **パトロールで他のペットを動かせない：** アクセシビリティ権限を許可してください。ダウンロード隔離とは別の仕組みです。
+- **パトロールで他のペットを動かせない：** Electron プロセスにアクセシビリティ権限を許可し、LLMPET を再起動してください。
 - **セッションが表示されない：** LLMPET 起動後に Claude Code / Codex の新しいセッションを開始し、`~/.octopus/octopus.log` を確認します。

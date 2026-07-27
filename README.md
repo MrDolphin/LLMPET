@@ -4,8 +4,6 @@
 
 一个实时盯着 **Claude Code 和 OpenAI Codex** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
-> **下载使用：** 前往 [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) 下载最新的 macOS / Windows 版本。Windows 可直接安装；当前 macOS 包尚未完成 Apple Developer ID 签名与公证，首次安装需要按下方说明执行两条终端命令。源码安装方式仍保留给开发和调试使用。
-
 共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 只读监听本机 rollout 文件，不修改 Codex 配置。
 
 **贡献者**：[@james6666-max](https://github.com/james6666-max) — Windows 平台支持：「去回复」窗口聚焦、终端 pid 链解析与缓存、electron-builder 打包链路、CI Windows 测试矩阵（[PR #6](https://github.com/myunwang/LLMPET/pull/6)）。欢迎更多 PR！
@@ -75,29 +73,11 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 
 ---
 
-## 安装与运行
+## 从源码安装与运行
 
-### 直接下载（推荐）
-
-[前往 Releases 下载最新版](https://github.com/myunwang/LLMPET/releases/latest)
-
-- **macOS（Apple Silicon）**：下载 `LLMPET-*-mac-arm64.zip`，解压后把 `LLMPET.app` 拖进“应用程序”，再在“终端”运行：
-
-  ```bash
-  xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
-  open "/Applications/LLMPET.app"
-  ```
-
-  当前公开包尚未完成 Apple Developer ID 签名与公证，而浏览器会给下载文件添加 `com.apple.quarantine` 隔离标记；Gatekeeper 因此可能提示应用“已损坏”或无法验证开发者。第一条命令只移除 **LLMPET.app** 的下载隔离标记，第二条命令启动应用。请只对本仓库官方 Release 下载的文件执行。它不会授予辅助功能权限；如需使用“巡视”，仍须前往“系统设置 → 隐私与安全性 → 辅助功能”手动允许 LLMPET。
-- **Windows（x64）**：推荐下载 `LLMPET-*-Windows-x64.exe` 安装版；也可以下载同名 `.zip` 免安装版，解压后直接运行。
-
-Release 包已包含 Electron 运行环境，不需要另行安装 Node.js、npm 或克隆仓库。首次启动会自动合并安装 Claude Code hooks，不会覆盖已有 hooks。
-
-完整的安装、源码部署、打包、权限与升级说明见 [《部署到用户本地》](docs/LOCAL_DEPLOYMENT.md)。
+完整的源码部署、调试、权限与本地打包说明见 [《部署到用户本地》](docs/LOCAL_DEPLOYMENT.md)。
 
 > **升级兼容说明：** `~/.octopus`、`OCTOPUS_*` 环境变量和 `octopus-hook.js` 是早期版本留下的内部兼容标识，为避免丢失配置、用量历史、辅助功能授权或已安装 hooks，1.0.0 继续保留；产品名称和所有对外发布物统一使用 **LLMPET**。
-
-### 从源码运行
 
 **前置条件**
 - macOS 或 Windows（状态显示、授权气泡、计量计费、「去回复」终端聚焦全都可用；「领地模式」目前仅 macOS）

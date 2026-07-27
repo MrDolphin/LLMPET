@@ -4,8 +4,6 @@
 
 LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認できるデスクトップペットです。考え中、ツール実行中、ユーザー待ち、完了、エラー、休憩中といった agent の状態に合わせて表情が変わります。最新の返答を吹き出しで表示し、セッション、コンテキスト使用率、レート制限、Claude の推定コスト、利用履歴をコンパクトなパネルで確認できます。
 
-> **ダウンロード：** 最新の macOS / Windows 版は [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) から入手できます。Windows はそのままインストールできます。現在の macOS 版は Apple Developer ID による署名と公証がまだ完了していないため、初回起動時に下記の 2 つのターミナルコマンドを実行してください。
-
 画面表示は **簡体字中国語、英語、日本語** に対応しています。トレイメニューの `設定 → 言語` から、再起動せずに切り替えられます。
 
 ## 主な機能
@@ -38,27 +36,9 @@ LLMPET は、**Claude Code と OpenAI Codex** の動きをひと目で確認で�
 
 月薪喵の素材は Douyin クリエイター **@月薪喵** のものです。詳細は [`assets/cat/CREDITS.md`](assets/cat/CREDITS.md) をご覧ください。
 
-## ダウンロードと起動
+## ソースから起動
 
-### 配布版
-
-[最新版をダウンロード](https://github.com/myunwang/LLMPET/releases/latest)
-
-- **macOS（Apple Silicon）：** `LLMPET-*-mac-arm64.zip` をダウンロードして展開し、`LLMPET.app` を「アプリケーション」へ移動してから、ターミナルで次を実行します。
-
-  ```bash
-  xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
-  open "/Applications/LLMPET.app"
-  ```
-
-  現在の公開ビルドは、Apple Developer ID による署名と公証がまだ完了していません。また、ブラウザはダウンロードしたファイルに `com.apple.quarantine` 属性を付けるため、Gatekeeper が「壊れている」または開発元を確認できないと表示する場合があります。1 行目は **LLMPET.app だけ**からダウンロード隔離属性を削除し、2 行目でアプリを起動します。このリポジトリの公式 Releases から入手したファイルにだけ使用してください。この操作でアクセシビリティ権限が付与されることはありません。パトロールモードを使う場合は、別途 `システム設定 → プライバシーとセキュリティ → アクセシビリティ` で LLMPET を許可してください。
-- **Windows（x64）：** インストーラー版は `LLMPET-*-Windows-x64.exe`、ポータブル版は同名の `.zip` を利用してください。
-
-初回起動時、LLMPET は既存設定を上書きせずに Claude Code hook を追加します。
-
-インストール、ソースからの導入、パッケージ作成、権限、更新手順の詳細は [ローカル環境への導入](docs/LOCAL_DEPLOYMENT_JA.md) をご覧ください。
-
-### ソースから起動
+ソースからの導入、ローカルパッケージ作成、権限、トラブルシューティングは [ローカル環境への導入](docs/LOCAL_DEPLOYMENT_JA.md) をご覧ください。
 
 必要なもの：
 

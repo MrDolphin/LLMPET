@@ -1,39 +1,16 @@
 # Deploy LLMPET locally
 
-This guide covers installing a packaged Release and running or packaging LLMPET from source.
+This guide covers running and testing LLMPET from source and creating packages for local development validation.
 
 ## Supported targets
 
-| Platform | Release artifact | From source |
+| Platform | From source | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `LLMPET-*-mac-arm64.zip` | Supported |
-| Windows x64 | `LLMPET-*-Windows-x64.exe` / `.zip` | Supported |
-| Linux | None | Not officially supported |
+| macOS Apple Silicon | Supported | Patrol mode is macOS-only |
+| Windows x64 | Supported | Session focusing supports common terminals |
+| Linux | Not officially supported | Window focusing is not implemented |
 
 Claude Code and/or OpenAI Codex must already be installed and used at least once.
-
-## Install a Release
-
-### macOS Apple Silicon
-
-1. Download `LLMPET-*-mac-arm64.zip` from [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest).
-2. Extract it and move `LLMPET.app` to Applications.
-3. Run:
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
-   open "/Applications/LLMPET.app"
-   ```
-
-The current public macOS build has not yet completed Apple Developer ID signing and notarization. Browsers add the `com.apple.quarantine` attribute to downloads, so Gatekeeper may report the app as damaged or unverifiable. The first command removes that download quarantine attribute from LLMPET only; the second launches it.
-
-Use this command only for LLMPET downloaded from this repository's official Releases page. It is not Apple notarization and does not grant system permissions.
-
-Patrol mode requires a separate user approval under `System Settings → Privacy & Security → Accessibility`. Restart LLMPET after enabling it.
-
-### Windows x64
-
-Download the `.exe` installer or portable `.zip` from [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest). If SmartScreen warns about an unsigned build, verify that it came from the official Release before choosing `More info → Run anyway`.
 
 ## First launch
 
@@ -98,7 +75,7 @@ For a local ad-hoc-signed macOS package:
 npm run package:mac:dev
 ```
 
-This produces `dist/LLMPET.app` and `dist/LLMPET-<version>-mac-<arch>-unsigned.zip`. A receiving Mac may still need the `xattr` command above. `npm run package:mac` is the fail-closed public release path and requires Apple Developer ID and notarization credentials; see [macOS release signing and notarization](MACOS_RELEASE.md).
+This produces `dist/LLMPET.app` and `dist/LLMPET-<version>-mac-<arch>-unsigned.zip`. The ad-hoc-signed package is for local development validation only and is not a public distribution. `npm run package:mac` is the fail-closed public release path and requires Apple Developer ID and notarization credentials; see [macOS release signing and notarization](MACOS_RELEASE.md).
 
 On Windows x64:
 
@@ -108,9 +85,7 @@ npm run package:win
 
 The NSIS installer and portable ZIP are written to `dist/`.
 
-## Update or uninstall
-
-On macOS, quit LLMPET, replace `/Applications/LLMPET.app`, then repeat the `xattr` and `open` commands while builds remain unnotarized. User data in `~/.octopus/` is retained, although macOS may ask for Accessibility approval again after a signing-identity change.
+## Uninstall
 
 Before uninstalling, remove Claude hooks from the tray or from a source checkout:
 
@@ -118,10 +93,9 @@ Before uninstalling, remove Claude hooks from the tray or from a source checkout
 npm run uninstall:hooks
 ```
 
-Then quit and delete LLMPET. Remove `~/.octopus/` only if you also want to delete configuration, usage history, and logs.
+Then quit LLMPET. Remove `~/.octopus/` only if you also want to delete configuration, usage history, and logs.
 
 ## Troubleshooting
 
-- **macOS says the app is damaged:** confirm the source and application path, then run the documented `xattr` and `open` commands.
-- **Patrol cannot move another pet:** grant Accessibility permission; this is unrelated to quarantine.
+- **Patrol cannot move another pet:** grant the Electron process Accessibility permission and restart LLMPET.
 - **No sessions appear:** start a new Claude Code or Codex session after LLMPET, then inspect `~/.octopus/octopus.log`.
