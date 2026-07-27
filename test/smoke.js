@@ -25,10 +25,11 @@ const permissions = createPermissions({
 });
 const server = createServer({ core, permissions, shouldDropForDnd: () => false });
 
-function post(pathName, body) {
-  return new Promise((resolve, reject) => {
+function postAbortable(pathName, body) {
+  let req;
+  const settled = new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
-    const req = http.request(
+    req = http.request(
       { hostname: '127.0.0.1', port: server.getPort(), path: pathName, method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
       (res) => {
@@ -40,6 +41,11 @@ function post(pathName, body) {
     req.on('error', reject);
     req.end(payload);
   });
+  return { req, settled };
+}
+
+function post(pathName, body) {
+  return postAbortable(pathName, body).settled;
 }
 
 function get(pathName) {
@@ -147,22 +153,81 @@ async function main() {
   const ptResp = await post('/permission', { tool_name: 'TaskCreate', tool_input: {}, session_id: 'pt' });
   check('TaskCreate auto-allow', () => assert.strictEqual(JSON.parse(ptResp.body).hookSpecificOutput.decision.behavior, 'allow'));
 
-  console.log('\n[7] 会话继续后清扫过期权限气泡：丢弃连接，绝不回 deny 裁决');
+  console.log('\n[7] 并行事件保留权限卡；只在 SessionEnd 无裁决清理');
   const sweepSid = 'sweep-session-dddd';
-  // 创建即挂上结算收集器：清扫断连发生在下面 /state 的应答之前，若等到那时才
-  // await + catch，中间的窗口会触发 unhandledRejection（Node ≥15 直接崩进程）。
-  const sweepSettled = post('/permission', { tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sweepSid })
+  const bashP = post('/permission', { tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sweepSid });
+  const writeP = post('/permission', { tool_name: 'Write', tool_input: { file_path: '/tmp/parallel.txt' }, session_id: sweepSid });
+  await sleep(60);
+  check('two distinct permissions can wait in one shared session', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 2);
+  });
+  for (const [event, state] of [
+    ['PostToolUse', 'working'],
+    ['PostToolUseFailure', 'error'],
+    ['Stop', 'attention'],
+    ['UserPromptSubmit', 'thinking'],
+  ]) {
+    await post('/state', { state, event, tool_name: 'Bash', session_id: sweepSid });
+  }
+  check('unrelated lifecycle events keep both live permission cards', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 2);
+  });
+  const sweepPending = permissions.getPending().filter((p) => p.sessionId === sweepSid);
+  permissions.decide(sweepPending.find((p) => p.toolName === 'Bash').id, 'allow');
+  permissions.decide(sweepPending.find((p) => p.toolName === 'Write').id, 'deny');
+  const [bashResp, writeResp] = await Promise.all([bashP, writeP]);
+  check('later clicks resolve only their matching parallel requests', () => {
+    assert.strictEqual(JSON.parse(bashResp.body).hookSpecificOutput.decision.behavior, 'allow');
+    assert.strictEqual(JSON.parse(writeResp.body).hookSpecificOutput.decision.behavior, 'deny');
+  });
+
+  const endSid = 'ended-session-eeee';
+  const endSettled = post('/permission', { tool_name: 'Bash', tool_input: { command: 'pwd' }, session_id: endSid })
     .then((resp) => ({ resp }), (err) => ({ err }));
   await sleep(60);
-  check('one pending before sweep', () => assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 1));
-  await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: sweepSid });
-  // PostToolUse 在后台/并行子代理完成工具时同样会到达：清扫只能丢弃挂起的连接
-  // （CC 回退到终端提示），回 deny 会误拒真正还在等用户点击的请求。
-  const sweepOutcome = await sweepSettled;
-  check('swept perm dropped without a decision (CC falls back to terminal prompt)', () => {
-    assert(sweepOutcome.err, 'expected the held connection to be destroyed, got response: ' + (sweepOutcome.resp && sweepOutcome.resp.body));
+  await post('/state', { state: 'sleeping', event: 'SessionEnd', session_id: endSid });
+  const endOutcome = await endSettled;
+  check('SessionEnd drops stale permission without allow/deny', () => {
+    assert(endOutcome.err);
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === endSid).length, 0);
   });
-  check('no pending after sweep', () => assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 0));
+
+  console.log('\n[7b] primary hook disconnect promotes a live duplicate instead of denying it');
+  const dupSid = 'duplicate-session-ffff';
+  const dupBody = { tool_name: 'Bash', tool_input: { command: 'echo duplicate' }, session_id: dupSid };
+  const primary = postAbortable('/permission', dupBody);
+  primary.settled.catch(() => {});
+  await sleep(30);
+  const duplicate = postAbortable('/permission', dupBody);
+  await sleep(60);
+  check('identical retry shares one permission card', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === dupSid).length, 1);
+  });
+  primary.req.destroy();
+  await sleep(30);
+  check('card remains pending after primary connection closes', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === dupSid).length, 1);
+  });
+  const dupPending = permissions.getPending().find((p) => p.sessionId === dupSid);
+  permissions.decide(dupPending.id, 'allow');
+  const duplicateResp = await duplicate.settled;
+  check('promoted duplicate receives the later user decision', () => {
+    assert.strictEqual(JSON.parse(duplicateResp.body).hookSpecificOutput.decision.behavior, 'allow');
+  });
+
+  const soloSid = 'disconnected-session-gggg';
+  const solo = postAbortable('/permission', {
+    tool_name: 'Bash',
+    tool_input: { command: 'echo terminal-answer' },
+    session_id: soloSid,
+  });
+  solo.settled.catch(() => {});
+  await sleep(60);
+  solo.req.destroy();
+  await sleep(30);
+  check('last connection close cleans the card without a synthetic decision', () => {
+    assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === soloSid).length, 0);
+  });
 
   console.log('\n[8] juggling/sweeping 透传（皮肤素材可达）+ 计数');
   const jSid = 'juggle-session-eeee';

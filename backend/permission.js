@@ -61,9 +61,9 @@ function buildElicitationUpdatedInput(toolInput, answers) {
   return { ...input, questions, answers: norm };
 }
 
-// Identity of a permission request, for collapsing duplicate re-sends. Two genuinely
-// separate asks never overlap (CC waits for the answer first), so an identical sig
-// while one is still pending == a retry, safe to merge.
+// Identity of a permission request, for collapsing duplicate re-sends. Distinct
+// requests can overlap when parallel/background agents share a session_id, so
+// only an identical session+tool+input signature is merged as the same retry.
 function requestSig(sessionId, toolName, toolInput) {
   let inp = '';
   try { inp = JSON.stringify(toolInput); } catch { inp = ''; }
@@ -95,6 +95,32 @@ function createPermissions(options = {}) {
 
   function destroy(res) {
     try { res.destroy(); } catch {}
+  }
+
+  // Keep a pending card alive while any duplicate/retry HTTP connection for
+  // the same PermissionRequest is still open. Claude Code can briefly have
+  // more than one identical hook connection during retries or when an old
+  // duplicate hook is still installed; losing the first connection must not
+  // turn into a deny for the surviving copy.
+  function attachPrimary(entry, res) {
+    entry.res = res;
+    entry.abortHandler = () => {
+      if (!pending.has(entry.id) || res.writableFinished) return;
+      while (entry.dupes.length) {
+        const next = entry.dupes.shift();
+        try { if (next.res && next.closeHandler) next.res.off('close', next.closeHandler); } catch {}
+        if (!next.res || next.res.destroyed || next.res.writableEnded) continue;
+        log('perm', `primary disconnected; promote dup for id=${entry.id.slice(0, 8)}`);
+        attachPrimary(entry, next.res);
+        return;
+      }
+      resolveEntry(entry, 'no-decision', 'Client disconnected');
+    };
+    if (!res || res.destroyed || res.writableEnded) {
+      entry.abortHandler();
+      return;
+    }
+    try { res.on('close', entry.abortHandler); } catch {}
   }
 
   // Resolve a pending entry: write the decision (or drop), clean up, notify.
@@ -162,9 +188,9 @@ function createPermissions(options = {}) {
     const isElicitation = toolName === 'AskUserQuestion';
 
     // De-dup retries: if an IDENTICAL request (same session+tool+input) is already
-    // pending and unanswered, this is a re-send (not a genuine new ask — Claude Code
-    // waits for the answer before issuing the next one). Attach this connection to
-    // the existing card instead of spawning a second one; resolveEntry answers all.
+    // pending and unanswered, attach this connection to the existing card.
+    // Different inputs remain separate because parallel agents can legitimately
+    // wait on more than one permission inside the same session.
     const sig = requestSig(sessionId, toolName, toolInput);
     for (const e of pending.values()) {
       if (e.sig === sig) {
@@ -196,17 +222,13 @@ function createPermissions(options = {}) {
       abortHandler: null,
     };
 
-    // CC disconnected before deciding → treat as deny.
-    entry.abortHandler = () => {
-      if (res.writableFinished) return;
-      resolveEntry(entry, 'deny', 'Client disconnected');
-    };
-    try { res.on('close', entry.abortHandler); } catch {}
-
+    pending.set(entry.id, entry);
+    attachPrimary(entry, res);
+    // attachPrimary may immediately remove an already-disconnected response.
+    if (!pending.has(entry.id)) return;
     entry.timer = setTimeout(() => resolveEntry(entry, 'no-decision', 'auto-close'), AUTO_CLOSE_MS);
     if (entry.timer.unref) entry.timer.unref();
 
-    pending.set(entry.id, entry);
     log('perm', `pending id=${entry.id.slice(0, 8)} ${toolName} session=${String(sessionId).slice(-6)}`);
     try { onAdded(entry); } catch (err) { log('perm', 'onAdded error:', err.message); }
     onChange();
@@ -244,20 +266,18 @@ function createPermissions(options = {}) {
     return resolveEntry(entry, behavior === 'allow' ? 'allow' : 'deny');
   }
 
-  // 会话明显已继续（用户在终端作答 / 新输入 / 会话结束）时，清掉该会话残留的
-  // 过期气泡。裁决必须是 no-decision（丢弃挂起的连接 → CC 回退到终端自己的权限
-  // 提示），不能是 deny：这些事件在同一 session_id 的并发活动里同样会触发——
-  // 后台 / 并行子代理每完成一个工具就发 PostToolUse，主会话的工具完成也会扫到
-  // 子代理正在等待的气泡。发 deny 会把真正还在等用户点击的请求直接拒掉（CC 端
-  // 显示 "Error: User answered in terminal"），逼 Claude 反复重试同一工具。
-  // no-decision 保留「清掉过期气泡」的本意，且从不替用户做决定：用户若真在终端
-  // 答过了，CC 早已关闭这条连接，丢弃即为无副作用的空操作。
-  const SWEEP_EVENTS = new Set(['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit', 'SessionEnd']);
+  // Only an actual session end proves every pending card for that session is
+  // stale. PostToolUse / Stop / UserPromptSubmit are not proof: parallel and
+  // background agents share the same session_id, so their lifecycle events
+  // must never remove another agent's live permission card. If the user answers
+  // in the terminal, Claude Code closes the held HTTP connection and the close
+  // handler above performs the no-decision cleanup.
+  const SWEEP_EVENTS = new Set(['SessionEnd']);
   function sweepForSessionEvent(sessionId, event) {
     if (!SWEEP_EVENTS.has(event)) return;
     for (const entry of [...pending.values()]) {
       if (entry.sessionId === sessionId) {
-        resolveEntry(entry, 'no-decision', 'User answered in terminal');
+        resolveEntry(entry, 'no-decision', 'Session ended');
       }
     }
   }

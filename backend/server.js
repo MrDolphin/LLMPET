@@ -202,7 +202,9 @@ function createServer(deps) {
         stopHookActive: data.stop_hook_active === true,
       };
 
-      // The user clearly answered in the terminal → clear stale permission bubbles.
+      // Only terminal session events that prove the request is stale (currently
+      // SessionEnd) may clear permission cards. Parallel tool events share a
+      // session_id and must not sweep another agent's live request.
       permissions.sweepForSessionEvent(sid, event);
 
       core.updateSession(sid, state, event, fields);
