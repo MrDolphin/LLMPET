@@ -30,12 +30,28 @@ async function main() {
   assert(meme.prompt.text.includes('不管是代码、方案还是随口一句话'));
   assert(meme.prompt.text.includes('是你真的推敲过，还是想当然顺手一编？'));
   assert(meme.prompt.text.includes('生瓜蛋子别端上来'));
+  assert.strictEqual(meme.prompt.version, 7);
+  assert(meme.prompt.text.includes('认错不算交付'));
+  assert(meme.prompt.text.includes('主动找一个能推翻“已经完成”的反例'));
+  assert(meme.prompt.text.includes('没完成就继续干'));
+  assert(meme.i18n.en.promptText.includes('an apology is not a deliverable'));
+  assert(meme.i18n.en.promptText.includes('Actively look for one counterexample'));
+  assert(meme.i18n.ja.promptText.includes('謝罪は成果物ではありません'));
+  assert(meme.i18n.ja.promptText.includes('反例を自分から一つ探す'));
   assert(fs.existsSync(path.join(root, 'assets', 'memes', meme.media.gif)));
   assert(fs.existsSync(path.join(root, 'assets', 'memes', meme.media.audio)));
   assert.strictEqual(meme.reaction.state, 'sorry');
   assert.strictEqual(meme.reaction.durationMs, 2600);
+  assert(meme.reaction.work);
+  assert.strictEqual(meme.reaction.work.durationMs, 30000);
+  assert.strictEqual(meme.reaction.work.visualState, 'sorry');
+  assert.deepStrictEqual(
+    [...meme.reaction.work.activeStates],
+    ['idle', 'sleeping', 'thinking', 'working', 'juggling', 'sweeping', 'loafing'],
+  );
   assert(!JSON.stringify(publicCatalog()).includes(meme.prompt.text), 'renderer catalog must not expose full prompts');
   assert.strictEqual(publicCatalog().items[0].reaction.state, 'sorry');
+  assert.strictEqual(publicCatalog().items[0].reaction.work.durationMs, 30000);
 
   const niGanMa = getMeme('ni-gan-ma');
   assert(niGanMa);
@@ -188,10 +204,32 @@ async function main() {
     transcriptPath: path.join(root, 'fake-rollout.jsonl'),
   }, meme.prompt.text);
   assert.strictEqual(codexDesktop.submitted, true);
+  assert.strictEqual(codexDesktop.inputSent, true);
   assert.strictEqual(codexDesktop.route, 'codex-desktop');
   assert.deepStrictEqual(desktopCalls.find((c) => c[0] === 'open'), ['open', codexId]);
   assert(desktopCalls.some((c) => c[0] === 'osascript'));
   assert(desktopCalls.some((c) => c[0] === 'verify'));
+
+  const delayedTranscriptDispatcher = createCommandDispatcher({
+    platform: 'darwin',
+    desktopOpenDelayMs: 0,
+    copyText: () => {},
+    openCodexThread: async () => true,
+    execFile: (_file, _args, _opts, cb) => cb(null, 'ok\n', ''),
+    verifyPrompt: async () => false,
+  });
+  const delayedTranscript = await delayedTranscriptDispatcher.dispatch({
+    id: codexId,
+    agentId: 'codex',
+    originator: 'Codex Desktop',
+    transcriptPath: path.join(root, 'fake-delayed-rollout.jsonl'),
+  }, meme.prompt.text);
+  assert.strictEqual(delayedTranscript.submitted, false);
+  assert.strictEqual(
+    delayedTranscript.inputSent,
+    true,
+    'native submit success must remain distinct from delayed transcript confirmation',
+  );
 
   const claudeDesktopCalls = [];
   const claudeDesktopDispatcher = createCommandDispatcher({
@@ -219,6 +257,7 @@ async function main() {
   // when the developer machine has no matching real metadata.
   assert.strictEqual(typeof originalResolver, 'function');
   assert.strictEqual(claudeDesktop.submitted, true);
+  assert.strictEqual(claudeDesktop.inputSent, true);
   assert.strictEqual(claudeDesktop.route, 'claude-desktop');
   assert.deepStrictEqual(
     claudeDesktopCalls.find((c) => c[0] === 'open-claude'),
@@ -243,6 +282,7 @@ async function main() {
   assert(html.includes('id="sl-meme-view"'));
   assert(html.includes('id="meme-player"'));
   assert(js.includes('window.pet.triggerMeme(target.sessionId, meme.id)'));
+  assert(js.includes('applyDeliveredMemeWorkReaction(meme, result)'));
   assert(js.includes('function alignMemePlayer()'));
   assert(js.includes('if (memeLayoutActive)'));
   assert(css.includes('.sl-meme-entry'));
@@ -273,6 +313,88 @@ async function main() {
   assert(!world.elements('meme-player').classList.contains('hidden'));
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert(world.elements('meme-player').classList.contains('hidden'));
+
+  const stats = (over = {}) => ({
+    today: { cost: 0 },
+    window5h: { cost: 0 },
+    sessions: [],
+    bg: { zombie: 0 },
+    waitingCount: 0,
+    needsinputCount: 0,
+    workingCount: 0,
+    jugglingCount: 0,
+    sweepingCount: 0,
+    thinkingCount: 0,
+    loafingCount: 0,
+    errorCount: 0,
+    idleMs: 1000,
+    ...over,
+  });
+  const workMeme = {
+    media: {
+      gif: 'huaqiang-guaranteed/visual.gif',
+      audio: 'huaqiang-guaranteed/voice.mp3',
+      durationMs: 1,
+      placement: 'pet-right',
+    },
+    reaction: {
+      work: {
+        durationMs: 30000,
+        visualState: 'sorry',
+        activeStates: ['idle', 'sleeping', 'thinking', 'working', 'juggling', 'sweeping', 'loafing'],
+      },
+    },
+  };
+  world.handlers.stats(stats({ workingCount: 1 }));
+  const normalWorkSrc = world.elements('cat-img').src;
+  assert(
+    /cat-working(?:-[234])?\.gif$/.test(normalWorkSrc),
+    'failed submission must leave the normal work pool active',
+  );
+  world.sandbox.playMeme(workMeme);
+  assert(
+    world.elements('cat-img').src.endsWith('cat-waiting.gif'),
+    'meme event must start the sweating work visual immediately without waiting for transcript verification',
+  );
+  assert.strictEqual(
+    world.sandbox.applyDeliveredMemeWorkReaction(workMeme, { submitted: false, inputSent: false }),
+    false,
+    'explicit input failure must cancel the optimistic work reaction',
+  );
+  assert(
+    /cat-working(?:-[234])?\.gif$/.test(world.elements('cat-img').src),
+    'cancelled optimistic reaction must return to the normal work pool',
+  );
+  assert.strictEqual(
+    world.sandbox.applyDeliveredMemeWorkReaction(workMeme, { submitted: false, inputSent: true }),
+    true,
+    'native input success must survive delayed transcript confirmation',
+  );
+  assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'));
+  assert.strictEqual(
+    world.sandbox.applyDeliveredMemeWorkReaction(workMeme, { submitted: true, inputSent: true }),
+    true,
+    'submitted prompt must start the configured work reaction',
+  );
+  assert(world.elements('cat').classList.contains('working'), 'work reaction must not falsify the semantic state');
+  assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'), 'active work must use the sweating cat visual');
+  world.handlers.stats(stats({ idleMs: 1000 }));
+  assert(world.elements('cat').classList.contains('idle'), 'watcher gap must remain semantically idle');
+  assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'), 'idle watcher gap must not break the 30s visual');
+  world.handlers.stats(stats({ idleMs: null }));
+  assert(world.elements('cat').classList.contains('sleeping'), 'missing active sessions must remain semantically sleeping');
+  assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'), 'sleeping watcher gap must not break the 30s visual');
+  world.handlers.stats(stats({ errorCount: 1, workingCount: 1 }));
+  assert(world.elements('cat').classList.contains('error'), 'error must interrupt the sweating work visual');
+  assert(world.elements('cat-img').src.endsWith('cat-error.gif'));
+  world.handlers.stats(stats({ workingCount: 1 }));
+  assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'), 'work visual resumes inside the 30s window');
+  world.clock.offset += 31000;
+  world.handlers.stats(stats({ workingCount: 1 }));
+  assert(
+    /cat-working(?:-[234])?\.gif$/.test(world.elements('cat-img').src),
+    'after 30s the cat must return to the normal randomized work pool',
+  );
 
   console.log('meme actions tests passed');
   process.exit(0);

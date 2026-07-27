@@ -10,6 +10,13 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 const MEDIA_RE = /^[a-z0-9][a-z0-9._/-]{1,180}$/i;
 const MAX_PROMPT_CHARS = 12000;
 const REACTION_STATES = new Set(RENDER_STATE_WORDS);
+// A submitted prompt can briefly disappear from the session watcher while the
+// desktop client resumes it. `idle` / `sleeping` bridge that observation gap
+// visually without changing the semantic state. Human-action states such as
+// waiting/needsinput/error/done remain excluded so they can interrupt at once.
+const WORK_REACTION_STATES = new Set([
+  'idle', 'sleeping', 'thinking', 'working', 'juggling', 'sweeping', 'loafing',
+]);
 // Locales an item may carry overrides for. The base fields stay Chinese so an
 // item without `i18n` still works — and so the zh build is never a lookup.
 const TRANSLATED_LANGS = ['en', 'ja'];
@@ -41,6 +48,22 @@ function validateI18n(id, raw) {
     });
   }
   return Object.freeze(out);
+}
+
+function validateWorkReaction(id, raw) {
+  if (raw == null) return null;
+  if (typeof raw !== 'object' || !REACTION_STATES.has(raw.visualState)) {
+    throw new Error(`${id}: reaction.work.visualState 不合法`);
+  }
+  const activeStates = Array.isArray(raw.activeStates) ? raw.activeStates : [...WORK_REACTION_STATES];
+  if (!activeStates.length || activeStates.some((state) => !WORK_REACTION_STATES.has(state))) {
+    throw new Error(`${id}: reaction.work.activeStates 包含不可覆盖状态`);
+  }
+  return Object.freeze({
+    durationMs: Math.max(1000, Math.min(120000, Number(raw.durationMs) || 30000)),
+    visualState: raw.visualState,
+    activeStates: Object.freeze([...new Set(activeStates)]),
+  });
 }
 
 function validateItem(raw) {
@@ -85,6 +108,7 @@ function validateItem(raw) {
       state: reaction.state,
       durationMs: Math.max(800, Math.min(30000, Number(reaction.durationMs) || 3000)),
       label: String(reaction.label || '').slice(0, 80),
+      work: validateWorkReaction(raw.id, reaction.work),
     }),
   });
 }

@@ -271,6 +271,7 @@ function createCommandDispatcher(options = {}) {
     return {
       ok: true,
       submitted: false,
+      inputSent: false,
       copied: true,
       focused,
       route: 'manual',
@@ -305,11 +306,11 @@ function createCommandDispatcher(options = {}) {
           env: { ...process.env, LLMPET_MEME_RESUME: '1' },
         });
       } catch (err) {
-        finish({ ok: false, submitted: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
+        finish({ ok: false, submitted: false, inputSent: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
         return;
       }
       child.once('error', (err) => {
-        finish({ ok: false, submitted: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
+        finish({ ok: false, submitted: false, inputSent: false, route: kind, message: `${name} 续聊启动失败：${err.message || err}` });
       });
       child.once('spawn', () => {
         spawned = true;
@@ -317,7 +318,7 @@ function createCommandDispatcher(options = {}) {
         setTimeout(() => {
           if (settled) return;
           if (child.exitCode != null && child.exitCode !== 0) {
-            finish({ ok: false, submitted: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${child.exitCode}）。` });
+            finish({ ok: false, submitted: false, inputSent: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${child.exitCode}）。` });
             return;
           }
           finish({
@@ -326,6 +327,7 @@ function createCommandDispatcher(options = {}) {
             // appended the prompt yet. Its caller verifies the transcript
             // before reporting submitted=true.
             submitted: kind === 'codex-resume',
+            inputSent: kind === 'codex-resume',
             launched: true,
             copied: false,
             focused: false,
@@ -337,15 +339,15 @@ function createCommandDispatcher(options = {}) {
       });
       child.once('exit', (code) => {
         if (!settled && spawned && code !== 0) {
-          finish({ ok: false, submitted: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${code}）。` });
+          finish({ ok: false, submitted: false, inputSent: false, route: kind, message: `${name} 未能恢复指定 session（退出码 ${code}）。` });
         }
       });
     });
   }
 
   async function dispatch(session, prompt) {
-    if (!session) return { ok: false, submitted: false, message: '目标 session 不存在，请重新选择。' };
-    if (!validPrompt(prompt)) return { ok: false, submitted: false, message: 'Prompt 为空或过长，已拒绝下发。' };
+    if (!session) return { ok: false, submitted: false, inputSent: false, message: '目标 session 不存在，请重新选择。' };
+    if (!validPrompt(prompt)) return { ok: false, submitted: false, inputSent: false, message: 'Prompt 为空或过长，已拒绝下发。' };
     let route = routeForSession(session, platform);
     if (
       platform === 'darwin' &&
@@ -361,7 +363,7 @@ function createCommandDispatcher(options = {}) {
       if (typed.ok) {
         const entered = await runFile(execImpl, 'tmux', ['-S', session.tmuxSocket, 'send-keys', '-t', session.tmuxClient, 'Enter']);
         if (entered.ok) {
-          return { ok: true, submitted: true, copied: false, focused: false, route: 'tmux', message: '已精确下发到所选 tmux session。' };
+          return { ok: true, submitted: true, inputSent: true, copied: false, focused: false, route: 'tmux', message: '已精确下发到所选 tmux session。' };
         }
       }
       return stageFallback(session, prompt, 'tmux 精确下发失败；Prompt 已复制并尝试聚焦目标 session。');
@@ -371,7 +373,7 @@ function createCommandDispatcher(options = {}) {
       try { copyText(prompt); } catch {}
       const sent = await runFile(execImpl, 'osascript', ['-e', TERMINAL_PASTE_SCRIPT, '--', cleanTty(session.terminalTty)]);
       if (sent.ok && sent.stdout === 'ok') {
-        return { ok: true, submitted: true, copied: true, focused: true, route: 'mac-terminal', message: '已精确下发到所选 Terminal session。' };
+        return { ok: true, submitted: true, inputSent: true, copied: true, focused: true, route: 'mac-terminal', message: '已精确下发到所选 Terminal session。' };
       }
       return stageFallback(session, prompt, 'Terminal 标签页定位或输入失败；Prompt 已复制并聚焦目标 session。');
     }
@@ -391,6 +393,7 @@ function createCommandDispatcher(options = {}) {
         return {
           ok: true,
           submitted: false,
+          inputSent: false,
           copied: true,
           focused: opened,
           route: 'codex-desktop',
@@ -402,6 +405,7 @@ function createCommandDispatcher(options = {}) {
         return {
           ok: true,
           submitted: true,
+          inputSent: true,
           copied: true,
           focused: true,
           route: 'codex-desktop',
@@ -411,6 +415,9 @@ function createCommandDispatcher(options = {}) {
       return {
         ok: true,
         submitted: false,
+        // The native paste/submit script completed. Transcript observation is
+        // a separate, eventually-consistent confirmation channel.
+        inputSent: true,
         copied: true,
         focused: true,
         route: 'codex-desktop',
@@ -440,6 +447,7 @@ function createCommandDispatcher(options = {}) {
         return {
           ok: true,
           submitted: false,
+          inputSent: false,
           copied: true,
           focused: opened,
           route: 'claude-desktop',
@@ -453,6 +461,7 @@ function createCommandDispatcher(options = {}) {
         return {
           ok: true,
           submitted: false,
+          inputSent: false,
           copied: true,
           focused: opened,
           route: 'claude-desktop',
@@ -464,6 +473,7 @@ function createCommandDispatcher(options = {}) {
         return {
           ok: true,
           submitted: true,
+          inputSent: true,
           copied: false,
           focused: true,
           route: 'claude-desktop',
@@ -474,6 +484,7 @@ function createCommandDispatcher(options = {}) {
       return {
         ok: true,
         submitted: false,
+        inputSent: true,
         copied: true,
         focused: true,
         route: 'claude-desktop',

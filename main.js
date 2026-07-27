@@ -772,7 +772,8 @@ function registerIpc() {
     log(
       'meme',
       `${meme.id} → ${String(session.id).slice(-6)} agent=${adapter.agentOf(session)} ` +
-        `route=${result.route || '-'} submitted=${!!result.submitted} detail=${result.message || '-'}`,
+        `route=${result.route || '-'} submitted=${!!result.submitted} inputSent=${!!result.inputSent} ` +
+        `detail=${result.message || '-'}`,
     );
     return {
       ...result,

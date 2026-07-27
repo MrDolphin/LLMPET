@@ -92,10 +92,34 @@ const CAT_POOLS = {
 const POOL_ROTATE_MS = 60 * 1000;
 let poolIdx = 0;
 let poolRot = null;
+let memeWorkReaction = null;
+let memeWorkReactionTimer = null;
+function finishMemeWorkReaction(refresh = false) {
+  memeWorkReaction = null;
+  clearTimeout(memeWorkReactionTimer);
+  memeWorkReactionTimer = null;
+  // 高压工作姿态结束后，从当前真实状态的动画池随机接一张，避免每次
+  // 都机械地回到同一个默认动作。睡眠唤醒或测试时钟跨越期限后，
+  // activeMemeWorkVisual 的惰性到期路径也会走这里。
+  const pool = CAT_POOLS[state];
+  if (pool && pool.length) poolIdx = Math.floor(Math.random() * pool.length);
+  if (refresh && skin === 'cat') updateCat(state);
+}
+function activeMemeWorkVisual(s) {
+  if (!memeWorkReaction) return null;
+  if (perfNow() >= memeWorkReaction.until) {
+    finishMemeWorkReaction(false);
+    return null;
+  }
+  return memeWorkReaction.activeStates.has(s) ? memeWorkReaction.visualState : null;
+}
 function updateCat(s) {
   if (!catImg) return;
-  const pool = CAT_POOLS[s];
-  const f = pool ? pool[poolIdx % pool.length] : (CAT_STATES[s] || CAT_STATES.idle);
+  const workVisual = activeMemeWorkVisual(s);
+  const pool = workVisual ? null : CAT_POOLS[s];
+  const f = workVisual
+    ? (CAT_STATES[workVisual] || CAT_STATES.working)
+    : (pool ? pool[poolIdx % pool.length] : (CAT_STATES[s] || CAT_STATES.idle));
   if (!catImg.getAttribute('src').endsWith(f)) catImg.src = '../assets/cat/' + f;
   if (pool) {
     if (!poolRot) {
@@ -111,6 +135,48 @@ function updateCat(s) {
     poolRot = null;
     poolIdx++; // 下次进入轮换态直接是下一张
   }
+}
+function clearMemeWorkReaction(refresh = true) {
+  const wasActive = !!memeWorkReaction;
+  memeWorkReaction = null;
+  clearTimeout(memeWorkReactionTimer);
+  memeWorkReactionTimer = null;
+  if (wasActive && refresh && skin === 'cat') updateCat(state);
+}
+function startMemeWorkReaction(work) {
+  clearMemeWorkReaction(false);
+  if (!work || !work.visualState || !Array.isArray(work.activeStates) || !work.activeStates.length) {
+    if (skin === 'cat') updateCat(state);
+    return false;
+  }
+  const durationMs = Math.max(1000, Math.min(120000, Number(work.durationMs) || 30000));
+  memeWorkReaction = {
+    visualState: work.visualState,
+    activeStates: new Set(work.activeStates),
+    until: perfNow() + durationMs,
+  };
+  if (skin === 'cat') updateCat(state);
+  memeWorkReactionTimer = setTimeout(() => {
+    if (!memeWorkReaction || perfNow() < memeWorkReaction.until) return;
+    finishMemeWorkReaction(true);
+  }, durationMs + 30);
+  return true;
+}
+function applyDeliveredMemeWorkReaction(meme, result) {
+  // inputSent means the native input path itself completed. submitted is the
+  // stronger, eventually-consistent transcript confirmation. The reaction
+  // should not disappear merely because transcript refresh lagged behind.
+  if (!result || (!result.submitted && !result.inputSent)) {
+    // playMeme starts the visual optimistically so it is continuous with the
+    // short meme reaction. An explicit delivery failure must roll that back.
+    clearMemeWorkReaction(true);
+    return false;
+  }
+  // Usually playMeme already started it. Do not restart the 30-second clock
+  // after transcript verification, otherwise slow confirmation lengthens the
+  // configured reaction unpredictably.
+  if (memeWorkReaction) return true;
+  return startMemeWorkReaction(meme && meme.reaction && meme.reaction.work);
 }
 const bubble = document.getElementById('bubble');
 const bubbleText = document.getElementById('bubble-text');
@@ -837,6 +903,7 @@ async function openMemePage(session) {
       } catch (err) {
         result = { ok: false, submitted: false, message: err && err.message ? err.message : t('meme.failed') };
       }
+      const workReactionStarted = applyDeliveredMemeWorkReaction(meme, result);
       card.disabled = false;
       if (result && result.ok) {
         memeCaption.textContent = t(result.submitted ? 'meme.sent' : 'meme.copied', { label: meme.label });
@@ -844,7 +911,12 @@ async function openMemePage(session) {
         memeCaption.textContent = (result && result.message) || t('meme.failed');
         if (memePlayer.classList.contains('hidden')) showBubble(memeCaption.textContent, 3600, true);
       }
-      rlog('meme', `${meme.id} target=${String(target.sessionId || '').slice(-6)} submitted=${!!(result && result.submitted)}`);
+      rlog(
+        'meme',
+        `${meme.id} target=${String(target.sessionId || '').slice(-6)} ` +
+          `submitted=${!!(result && result.submitted)} inputSent=${!!(result && result.inputSent)} ` +
+          `workReaction=${workReactionStarted}`,
+      );
     });
     slMemeGrid.appendChild(card);
   }
@@ -939,6 +1011,10 @@ function playMeme(meme) {
   if (meme.reaction && meme.reaction.state) {
     transient(meme.reaction.state, Number(meme.reaction.durationMs) || Number(meme.media.durationMs) || 3000);
   }
+  // Start the longer work visual at the same instant as the meme response.
+  // The dispatch result later confirms it (submitted/inputSent) or cancels it
+  // on a real delivery failure, so there is no transcript-lag gap.
+  startMemeWorkReaction(meme.reaction && meme.reaction.work);
   requestAnimationFrame(() => requestAnimationFrame(alignMemePlayer));
   if (!muted && typeof window.Audio === 'function') {
     try {
@@ -1033,7 +1109,12 @@ buildPixel();
 // 必须覆盖此全集，漏一个就会 class 残留在皮肤元素上。
 const STATE_WORDS = (window.OctoStates && window.OctoStates.RENDER_STATE_WORDS) || [];
 function setState(s) {
-  if (state === s) return;
+  if (state === s) {
+    // 语义状态没变，限时视觉层仍可能刚刚到期；同状态快照也要让猫
+    // 重新选图，否则 30s 的高压工作姿态会一直拖到下一次状态切换。
+    if (skin === 'cat') updateCat(s);
+    return;
+  }
   for (const el of stateEls) {
     el.classList.remove(...STATE_WORDS);
     el.classList.add(s);
