@@ -147,14 +147,22 @@ async function main() {
   const ptResp = await post('/permission', { tool_name: 'TaskCreate', tool_input: {}, session_id: 'pt' });
   check('TaskCreate auto-allow', () => assert.strictEqual(JSON.parse(ptResp.body).hookSpecificOutput.decision.behavior, 'allow'));
 
-  console.log('\n[7] stale permission swept when user answers in terminal');
+  console.log('\n[7] 会话继续后清扫过期权限气泡：丢弃连接，绝不回 deny 裁决');
   const sweepSid = 'sweep-session-dddd';
-  const sweepP = post('/permission', { tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sweepSid });
+  // 创建即挂上结算收集器：清扫断连发生在下面 /state 的应答之前，若等到那时才
+  // await + catch，中间的窗口会触发 unhandledRejection（Node ≥15 直接崩进程）。
+  const sweepSettled = post('/permission', { tool_name: 'Bash', tool_input: { command: 'ls' }, session_id: sweepSid })
+    .then((resp) => ({ resp }), (err) => ({ err }));
   await sleep(60);
   check('one pending before sweep', () => assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 1));
   await post('/state', { state: 'working', event: 'PostToolUse', tool_name: 'Bash', session_id: sweepSid });
-  const sweepResp = await sweepP;
-  check('swept perm got deny', () => assert.strictEqual(JSON.parse(sweepResp.body).hookSpecificOutput.decision.behavior, 'deny'));
+  // PostToolUse 在后台/并行子代理完成工具时同样会到达：清扫只能丢弃挂起的连接
+  // （CC 回退到终端提示），回 deny 会误拒真正还在等用户点击的请求。
+  const sweepOutcome = await sweepSettled;
+  check('swept perm dropped without a decision (CC falls back to terminal prompt)', () => {
+    assert(sweepOutcome.err, 'expected the held connection to be destroyed, got response: ' + (sweepOutcome.resp && sweepOutcome.resp.body));
+  });
+  check('no pending after sweep', () => assert.strictEqual(permissions.getPending().filter((p) => p.sessionId === sweepSid).length, 0));
 
   console.log('\n[8] juggling/sweeping 透传（皮肤素材可达）+ 计数');
   const jSid = 'juggle-session-eeee';
