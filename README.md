@@ -4,7 +4,7 @@
 
 一个实时盯着 **Claude Code 和 OpenAI Codex** 的桌面宠物：它会随 agent 的状态变表情（思考 / 干活 / 等你授权 / 完成庆祝 / 睡觉），把 agent 的回复弹成气泡，并在详情面板里给出上下文、额度或花费、用量趋势与会话列表。Claude Code 需要授权时，还可以直接在桌宠上一键允许 / 拒绝。
 
-> **现在可以直接下载使用：** 普通用户无需安装 Node.js 或执行命令，前往 [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) 下载最新的 macOS / Windows 版本即可。源码安装方式仍保留给开发和调试使用。
+> **下载使用：** 前往 [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest) 下载最新的 macOS / Windows 版本。Windows 可直接安装；当前 macOS 包尚未完成 Apple Developer ID 签名与公证，首次安装需要按下方说明执行两条终端命令。源码安装方式仍保留给开发和调试使用。
 
 共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 只读监听本机 rollout 文件，不修改 Codex 配置。
 
@@ -81,10 +81,19 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 
 [前往 Releases 下载最新版](https://github.com/myunwang/LLMPET/releases/latest)
 
-- **macOS（Apple Silicon）**：下载 `LLMPET-*-mac-arm64.zip`，解压后打开 `LLMPET.app`。首次启动如被 macOS 拦截，请在 Finder 中右键应用选择“打开”；巡视其他桌宠还需要在系统设置中授予辅助功能权限。
+- **macOS（Apple Silicon）**：下载 `LLMPET-*-mac-arm64.zip`，解压后把 `LLMPET.app` 拖进“应用程序”，再在“终端”运行：
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
+  open "/Applications/LLMPET.app"
+  ```
+
+  当前公开包尚未完成 Apple Developer ID 签名与公证，而浏览器会给下载文件添加 `com.apple.quarantine` 隔离标记；Gatekeeper 因此可能提示应用“已损坏”或无法验证开发者。第一条命令只移除 **LLMPET.app** 的下载隔离标记，第二条命令启动应用。请只对本仓库官方 Release 下载的文件执行。它不会授予辅助功能权限；如需使用“巡视”，仍须前往“系统设置 → 隐私与安全性 → 辅助功能”手动允许 LLMPET。
 - **Windows（x64）**：推荐下载 `LLMPET-*-Windows-x64.exe` 安装版；也可以下载同名 `.zip` 免安装版，解压后直接运行。
 
 Release 包已包含 Electron 运行环境，不需要另行安装 Node.js、npm 或克隆仓库。首次启动会自动合并安装 Claude Code hooks，不会覆盖已有 hooks。
+
+完整的安装、源码部署、打包、权限与升级说明见 [《部署到用户本地》](docs/LOCAL_DEPLOYMENT.md)。
 
 > **升级兼容说明：** `~/.octopus`、`OCTOPUS_*` 环境变量和 `octopus-hook.js` 是早期版本留下的内部兼容标识，为避免丢失配置、用量历史、辅助功能授权或已安装 hooks，1.0.0 继续保留；产品名称和所有对外发布物统一使用 **LLMPET**。
 
@@ -98,14 +107,14 @@ Release 包已包含 Electron 运行环境，不需要另行安装 Node.js、npm
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
-npm install          # 装 electron（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install）
+npm ci               # 按 package-lock.json 安装（国内网络慢可加：ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm ci）
 npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子）
 ```
 
 启动后新开的 Claude Code / Codex 会话会被感知；近期仍活跃的 Codex rollout 也会静默恢复到会话列表。右键桌宠可切三款皮肤和单宠/双宠模式。
 
 **Windows 说明**
-- 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm install`）。
+- 命令与上面相同（PowerShell 下设镜像用 `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'` 再 `npm ci`）。
 - 钩子在 Windows 下经 PowerShell 运行；「去回复」通过 user32 把会话所在的终端窗口（Windows Terminal / cmd / VS Code 等）带到前台，Windows Terminal 多标签场景只能聚焦到窗口级别。
 - 终端归属解析（pid 链）首次约 1–2s（起一次 PowerShell），之后按会话缓存在 `~/.octopus/pidwalk-cache.json`，热路径无感。
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。

@@ -4,7 +4,7 @@
 
 LLMPET is a desktop companion that makes **Claude Code and OpenAI Codex** visible at a glance. Its expression changes while your agent is thinking, using tools, waiting for you, celebrating a completed turn, or taking a nap. It can surface the agent's latest reply in a speech bubble and show sessions, context usage, rate limits, estimated Claude cost, and usage history in a compact dashboard.
 
-> **Ready to use:** download the latest macOS or Windows build from [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest). The packaged app includes Electron, so regular users do not need Node.js or a terminal.
+> **Download:** get the latest macOS or Windows build from [GitHub Releases](https://github.com/myunwang/LLMPET/releases/latest). Windows can be installed directly. The current macOS build has not yet completed Apple Developer ID signing and notarization, so its first launch requires the two Terminal commands shown below.
 
 The interface is available in **Simplified Chinese, English, and Japanese**. Switch languages instantly from the tray menu under `Settings → Language`; no restart is required.
 
@@ -44,10 +44,19 @@ Salary Cat assets are credited to Douyin creator **@月薪喵**. See [`assets/ca
 
 [Download the latest release](https://github.com/myunwang/LLMPET/releases/latest)
 
-- **macOS (Apple Silicon):** download `LLMPET-*-mac-arm64.zip`, extract it, and open `LLMPET.app`. If Gatekeeper blocks the first launch, right-click the app in Finder and choose **Open**. Patrol mode also requires Accessibility permission.
+- **macOS (Apple Silicon):** download `LLMPET-*-mac-arm64.zip`, extract it, move `LLMPET.app` to Applications, then run:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/LLMPET.app"
+  open "/Applications/LLMPET.app"
+  ```
+
+  The current public build is not yet signed and notarized with an Apple Developer ID. Browsers add the `com.apple.quarantine` attribute to downloads, so Gatekeeper may report the app as “damaged” or from an unidentified developer. The first command removes that download quarantine attribute from **LLMPET.app only**; the second launches it. Use this only for a file downloaded from this repository's official Releases page. This does not grant Accessibility access: enable LLMPET separately under `System Settings → Privacy & Security → Accessibility` if you want to use Patrol mode.
 - **Windows (x64):** use `LLMPET-*-Windows-x64.exe` for the installer, or download the matching `.zip` for a portable build.
 
 On first launch, LLMPET merge-installs its Claude Code hooks without overwriting existing hooks.
+
+For installation, source deployment, packaging, permissions, and upgrades, see [Deploy LLMPET locally](docs/LOCAL_DEPLOYMENT_EN.md).
 
 ### Run from source
 
@@ -60,7 +69,7 @@ Requirements:
 ```bash
 git clone https://github.com/myunwang/LLMPET.git
 cd LLMPET
-npm install
+npm ci
 npm start
 ```
 
@@ -68,7 +77,7 @@ Useful commands:
 
 ```bash
 npm test                 # full headless regression suite
-npm run package:mac      # macOS ARM64 package
+npm run package:mac:dev  # local ad-hoc-signed macOS package
 npm run package:win      # Windows installer + portable ZIP
 npm run uninstall:hooks  # remove LLMPET's Claude hooks safely
 ```
