@@ -6,7 +6,13 @@
 
 共三款皮肤：章鱼 🐙、像素怪兽 👾、月薪喵 🐱（猫 meme 表情包，素材来自抖音 @月薪喵，见 `assets/cat/CREDITS.md`）。后端（状态机 / 计量 / 权限 / 进程对账）从零自有实现。Claude Code 通过公开 hook 接口接入；Codex 只读监听本机 rollout 文件，不修改 Codex 配置。
 
-**贡献者**：[@james6666-max](https://github.com/james6666-max) — Windows 平台支持：「去回复」窗口聚焦、终端 pid 链解析与缓存、electron-builder 打包链路、CI Windows 测试矩阵（[PR #6](https://github.com/myunwang/LLMPET/pull/6)）。欢迎更多 PR！
+**贡献者**
+
+- [@james6666-max](https://github.com/james6666-max) — Windows 平台支持：「去回复」窗口聚焦、终端 pid 链解析与缓存、electron-builder 打包链路、CI Windows 测试矩阵（[PR #6](https://github.com/myunwang/LLMPET/pull/6)）。
+- [@purrfecto114-lgtm](https://github.com/purrfecto114-lgtm) — 提交了 CodeWhale 接入、运行时安全、持久化防护与测试体系的深度审计及改进提案（[PR #10](https://github.com/myunwang/LLMPET/pull/10)）。该 PR 未合并，但其中投入的审计与方案工作同样值得感谢。
+- [@andglf](https://github.com/andglf) — 定位并修复并行子代理共享 session 时权限请求被误拒的问题，并提供了实测数据与回归测试（[PR #13](https://github.com/myunwang/LLMPET/pull/13)）。
+
+欢迎更多 PR！
 
 ### 月薪喵皮肤 × 状态
 

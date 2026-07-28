@@ -125,8 +125,10 @@ Patrol mode is currently macOS-only.
 - `LLMPET_NO_CODEX=1 npm start` — disable Codex rollout watching.
 - `LLMPET_CODEX_DIR=<dir> npm start` — use a custom rollout directory for testing.
 
-## Contributor
+## Contributors
 
-[@james6666-max](https://github.com/james6666-max) contributed Windows session focusing, terminal PID-chain resolution and caching, electron-builder packaging, and the Windows CI test matrix in [PR #6](https://github.com/myunwang/LLMPET/pull/6).
+- [@james6666-max](https://github.com/james6666-max) contributed Windows session focusing, terminal PID-chain resolution and caching, electron-builder packaging, and the Windows CI test matrix in [PR #6](https://github.com/myunwang/LLMPET/pull/6).
+- [@purrfecto114-lgtm](https://github.com/purrfecto114-lgtm) submitted an extensive audit and improvement proposal covering CodeWhale integration, runtime security, persistence hardening, and testing in [PR #10](https://github.com/myunwang/LLMPET/pull/10). The PR was not merged, but the audit and design effort are still appreciated.
+- [@andglf](https://github.com/andglf) diagnosed and fixed permission requests being incorrectly denied when parallel subagents shared a session, backed by runtime evidence and a regression test, in [PR #13](https://github.com/myunwang/LLMPET/pull/13).
 
 Contributions and issue reports are welcome.
