@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { RENDER_STATE_WORDS } = require('../shared/states');
 
 const CATALOG_PATH = path.join(__dirname, '..', 'assets', 'memes', 'catalog.json');
@@ -21,10 +22,10 @@ const WORK_REACTION_STATES = new Set([
 // item without `i18n` still works — and so the zh build is never a lookup.
 const TRANSLATED_LANGS = ['en', 'ja'];
 
-function safeMediaPath(value) {
+function safeMediaPath(value, memeRoot = MEME_ROOT) {
   if (typeof value !== 'string' || !MEDIA_RE.test(value) || value.includes('..')) return null;
-  const full = path.resolve(MEME_ROOT, value);
-  return full.startsWith(MEME_ROOT + path.sep) ? full : null;
+  const full = path.resolve(memeRoot, value);
+  return full.startsWith(memeRoot + path.sep) ? full : null;
 }
 
 // Per-locale overrides. Every field is optional and falls back to the Chinese
@@ -66,7 +67,7 @@ function validateWorkReaction(id, raw) {
   });
 }
 
-function validateItem(raw) {
+function validateItem(raw, memeRoot = MEME_ROOT) {
   if (!raw || typeof raw !== 'object' || !ID_RE.test(raw.id || '')) {
     throw new Error('表情包 id 不合法');
   }
@@ -75,8 +76,8 @@ function validateItem(raw) {
     || !raw.media.gif.startsWith(itemDir) || !raw.media.audio.startsWith(itemDir)) {
     throw new Error(`${raw.id}: 媒体文件必须放在 assets/memes/${raw.id}/ 独立目录`);
   }
-  const gif = safeMediaPath(raw.media && raw.media.gif);
-  const audio = safeMediaPath(raw.media && raw.media.audio);
+  const gif = safeMediaPath(raw.media && raw.media.gif, memeRoot);
+  const audio = safeMediaPath(raw.media && raw.media.audio, memeRoot);
   const prompt = raw.prompt && raw.prompt.text;
   if (!gif || !audio) throw new Error(`${raw.id}: 媒体路径不合法`);
   if (!fs.existsSync(gif) || !fs.existsSync(audio)) throw new Error(`${raw.id}: 媒体文件不存在`);
@@ -119,7 +120,8 @@ function loadCatalog(catalogPath = CATALOG_PATH) {
     throw new Error('表情包目录 schemaVersion 必须为 1');
   }
   const seen = new Set();
-  const items = raw.items.map(validateItem);
+  const memeRoot = path.dirname(catalogPath);
+  const items = raw.items.map((item) => validateItem(item, memeRoot));
   for (const item of items) {
     if (seen.has(item.id)) throw new Error(`表情包 id 重复: ${item.id}`);
     seen.add(item.id);
@@ -127,7 +129,129 @@ function loadCatalog(catalogPath = CATALOG_PATH) {
   return Object.freeze({ schemaVersion: 1, items: Object.freeze(items) });
 }
 
-const catalog = loadCatalog();
+function digest(value) {
+  return crypto.createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
+function statStamp(file) {
+  try {
+    const st = fs.statSync(file);
+    return `${st.size}:${Math.trunc(st.mtimeMs)}:${Math.trunc(st.ctimeMs)}`;
+  } catch {
+    return 'missing';
+  }
+}
+
+// Include every file below assets/memes so adding a new item directory is also
+// noticed. This is metadata-only (no GIF/MP3 bytes are read) and the catalog is
+// tiny, so polling is cheap and works on macOS, Windows and older Node/Linux
+// versions where recursive fs.watch support differs.
+function resourceStamp(memeRoot) {
+  const rows = [];
+  const visit = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      rows.push(`${path.relative(memeRoot, dir)}:missing`);
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const rel = path.relative(memeRoot, full);
+      if (entry.isDirectory()) visit(full);
+      else if (entry.isFile()) rows.push(`${rel}:${statStamp(full)}`);
+    }
+  };
+  visit(memeRoot);
+  return rows.join('|');
+}
+
+function mediaVersion(item, memeRoot) {
+  const gif = safeMediaPath(item.media.gif, memeRoot);
+  const audio = safeMediaPath(item.media.audio, memeRoot);
+  return digest(`${item.media.gif}:${statStamp(gif)}|${item.media.audio}:${statStamp(audio)}`);
+}
+
+function createCatalogStore(options = {}) {
+  const catalogPath = options.catalogPath || CATALOG_PATH;
+  const memeRoot = path.dirname(catalogPath);
+  const defaultPollMs = Math.max(100, Number(options.pollMs) || 750);
+  let catalog = loadCatalog(catalogPath);
+  let observedStamp = resourceStamp(memeRoot);
+  let revision = digest(observedStamp);
+
+  // Reload on demand as well as from the watcher. Opening the meme page after a
+  // resource edit therefore sees the change even if the polling tick has not
+  // fired yet. A half-written/invalid catalog keeps the last known-good copy.
+  function refresh() {
+    const nextStamp = resourceStamp(memeRoot);
+    if (nextStamp === observedStamp) return { catalog, revision, changed: false, error: null };
+    observedStamp = nextStamp;
+    try {
+      catalog = loadCatalog(catalogPath);
+      revision = digest(nextStamp);
+      return { catalog, revision, changed: true, error: null };
+    } catch (error) {
+      return { catalog, revision, changed: false, error };
+    }
+  }
+
+  function localizedCatalog(lang = 'zh') {
+    refresh();
+    return {
+      schemaVersion: catalog.schemaVersion,
+      revision,
+      items: catalog.items.map((raw) => {
+        const item = localize(raw, lang);
+        return {
+          id: item.id,
+          label: item.label,
+          description: item.description,
+          category: item.category,
+          tags: [...item.tags],
+          media: { ...item.media, version: mediaVersion(item, memeRoot) },
+          reaction: { ...item.reaction },
+          promptVersion: item.prompt.version,
+        };
+      }),
+    };
+  }
+
+  function memeById(id, lang = 'zh') {
+    refresh();
+    const item = catalog.items.find((entry) => entry.id === id);
+    return item ? localize(item, lang) : null;
+  }
+
+  function watch(watchOptions = {}) {
+    const pollMs = Math.max(100, Number(watchOptions.pollMs) || defaultPollMs);
+    let lastErrorStamp = '';
+    const timer = setInterval(() => {
+      const result = refresh();
+      if (result.changed) {
+        lastErrorStamp = '';
+        if (typeof watchOptions.onChange === 'function') watchOptions.onChange(localizedCatalog());
+      } else if (result.error) {
+        const key = `${observedStamp}:${result.error.message}`;
+        if (key !== lastErrorStamp && typeof watchOptions.onError === 'function') {
+          lastErrorStamp = key;
+          watchOptions.onError(result.error);
+        }
+      }
+    }, pollMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    return () => clearInterval(timer);
+  }
+
+  return Object.freeze({
+    refresh,
+    publicCatalog: localizedCatalog,
+    getMeme: memeById,
+    watch,
+  });
+}
 
 // Resolve one item's user-visible copy for `lang`, falling back field by field
 // to the Chinese base so a missing translation degrades to zh, never to blank.
@@ -143,34 +267,18 @@ function localize(item, lang) {
   };
 }
 
-function publicCatalog(lang = 'zh') {
-  return {
-    schemaVersion: catalog.schemaVersion,
-    items: catalog.items.map((raw) => {
-      const item = localize(raw, lang);
-      return {
-        id: item.id,
-        label: item.label,
-        description: item.description,
-        category: item.category,
-        tags: [...item.tags],
-        media: { ...item.media },
-        reaction: { ...item.reaction },
-        promptVersion: item.prompt.version,
-      };
-    }),
-  };
-}
+const defaultStore = createCatalogStore();
 
-function getMeme(id, lang = 'zh') {
-  const item = catalog.items.find((entry) => entry.id === id);
-  return item ? localize(item, lang) : null;
-}
+const publicCatalog = (lang = 'zh') => defaultStore.publicCatalog(lang);
+const getMeme = (id, lang = 'zh') => defaultStore.getMeme(id, lang);
+const watchCatalog = (options = {}) => defaultStore.watch(options);
 
 module.exports = {
   CATALOG_PATH,
   MAX_PROMPT_CHARS,
   loadCatalog,
+  createCatalogStore,
   publicCatalog,
   getMeme,
+  watchCatalog,
 };

@@ -757,6 +757,7 @@ let memeCatalog = { schemaVersion: 1, items: [] };
 let memeTarget = null;
 let memeTimer = null;
 let memeAudio = null;
+let memeCatalogRefreshTimer = null;
 // Claude 橙色 burst（小图标）
 const CLAUDE_ICON =
   '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
@@ -866,6 +867,12 @@ async function loadMemeCatalog() {
   return memeCatalog;
 }
 
+function memeMediaUrl(meme, kind) {
+  if (!meme || !meme.media || typeof meme.media[kind] !== 'string') return '';
+  const base = `../assets/memes/${meme.media[kind]}`;
+  return meme.media.version ? `${base}?v=${encodeURIComponent(meme.media.version)}` : base;
+}
+
 function setMemeStatus(text, kind = '') {
   slMemeStatus.textContent = text || '';
   slMemeStatus.className = 'sl-meme-status' + (kind ? ' ' + kind : '');
@@ -888,7 +895,7 @@ async function openMemePage(session) {
     const card = document.createElement('button');
     card.className = 'sl-meme-card';
     card.innerHTML =
-      `<img class="sl-meme-thumb" src="../assets/memes/${esc(meme.media.gif)}" alt="">` +
+      `<img class="sl-meme-thumb" src="${esc(memeMediaUrl(meme, 'gif'))}" alt="">` +
       `<span class="sl-meme-label">${esc(meme.label)}</span>` +
       `<span class="sl-meme-desc">${esc(meme.description)}</span>`;
     card.addEventListener('click', async (e) => {
@@ -1003,7 +1010,7 @@ function playMeme(meme) {
   }
   memeLayoutActive = true;
   currentMemePlacement = meme.media.placement === 'pet-left' ? 'pet-left' : 'pet-right';
-  memeImage.src = `../assets/memes/${meme.media.gif}`;
+  memeImage.src = memeMediaUrl(meme, 'gif');
   memeImage.alt = meme.label || t('meme.fallbackLabel');
   memeCaption.textContent = `${meme.label || t('meme.fallbackLabel')} · ${meme.project || ''}`;
   memePlayer.classList.remove('hidden');
@@ -1018,7 +1025,7 @@ function playMeme(meme) {
   requestAnimationFrame(() => requestAnimationFrame(alignMemePlayer));
   if (!muted && typeof window.Audio === 'function') {
     try {
-      memeAudio = new window.Audio(`../assets/memes/${meme.media.audio}`);
+      memeAudio = new window.Audio(memeMediaUrl(meme, 'audio'));
       memeAudio.volume = 0.9;
       const p = memeAudio.play();
       if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -1036,6 +1043,15 @@ function playMeme(meme) {
 
 memeImage.addEventListener('load', alignMemePlayer);
 window.pet.onMeme(playMeme);
+if (typeof window.pet.onMemeCatalogChanged === 'function') {
+  window.pet.onMemeCatalogChanged(() => {
+    clearTimeout(memeCatalogRefreshTimer);
+    memeCatalogRefreshTimer = setTimeout(async () => {
+      await loadMemeCatalog();
+      if (sessListOpen && memeTarget) await openMemePage(memeTarget);
+    }, 80);
+  });
+}
 function toggleSessList() { sessListOpen ? closeSessList() : openSessList(); }
 
 // 工具 -> 干活动作；道具 emoji 的运动变体

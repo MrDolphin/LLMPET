@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
-const { loadCatalog, publicCatalog, getMeme } = require('../backend/meme-catalog');
+const { loadCatalog, createCatalogStore, publicCatalog, getMeme } = require('../backend/meme-catalog');
 const {
   routeForSession,
   createCommandDispatcher,
@@ -52,6 +52,8 @@ async function main() {
   assert(!JSON.stringify(publicCatalog()).includes(meme.prompt.text), 'renderer catalog must not expose full prompts');
   assert.strictEqual(publicCatalog().items[0].reaction.state, 'sorry');
   assert.strictEqual(publicCatalog().items[0].reaction.work.durationMs, 30000);
+  assert(/^[a-f0-9]{16}$/.test(publicCatalog().revision), 'public catalog must expose a cache revision');
+  assert(/^[a-f0-9]{16}$/.test(publicCatalog().items[0].media.version), 'media must expose a cache version');
 
   const niGanMa = getMeme('ni-gan-ma');
   assert(niGanMa);
@@ -62,6 +64,49 @@ async function main() {
   assert.strictEqual(niGanMa.reaction.state, 'puzzled');
   assert.strictEqual(niGanMa.reaction.durationMs, 4400);
   assert(!JSON.stringify(publicCatalog()).includes(niGanMa.prompt.text), 'renderer catalog must not expose the ni-gan-ma prompt');
+
+  // Resource-only edits must become visible without restarting the backend.
+  const hotRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'llmpet-memes-hot-'));
+  const hotItemDir = path.join(hotRoot, 'hot-item');
+  const hotCatalogPath = path.join(hotRoot, 'catalog.json');
+  fs.mkdirSync(hotItemDir, { recursive: true });
+  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), 'gif-v1');
+  fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), 'audio-v1');
+  const hotRaw = {
+    schemaVersion: 1,
+    items: [{
+      id: 'hot-item',
+      label: 'v1',
+      media: { gif: 'hot-item/visual.gif', audio: 'hot-item/voice.mp3' },
+      prompt: { version: 1, text: 'hot prompt' },
+      reaction: { state: 'puzzled' },
+    }],
+  };
+  fs.writeFileSync(hotCatalogPath, JSON.stringify(hotRaw));
+  const hotStore = createCatalogStore({ catalogPath: hotCatalogPath, pollMs: 20 });
+  const hotV1 = hotStore.publicCatalog();
+  hotRaw.items[0].label = 'v2';
+  fs.writeFileSync(hotCatalogPath, JSON.stringify(hotRaw));
+  const hotV2 = hotStore.publicCatalog();
+  assert.strictEqual(hotV2.items[0].label, 'v2', 'catalog edits must reload on demand');
+  assert.notStrictEqual(hotV2.revision, hotV1.revision, 'catalog edit must change the public revision');
+  const mediaV1 = hotV2.items[0].media.version;
+  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), 'gif-v2-is-longer');
+  const mediaV2 = hotStore.publicCatalog().items[0].media.version;
+  assert.notStrictEqual(mediaV2, mediaV1, 'media replacement must bust the renderer cache');
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('meme resource watcher did not fire')), 1000);
+    const stop = hotStore.watch({
+      pollMs: 20,
+      onChange: () => {
+        clearTimeout(timeout);
+        stop();
+        resolve();
+      },
+    });
+    fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), 'audio-v2-is-longer');
+  });
+  fs.rmSync(hotRoot, { recursive: true, force: true });
 
   assert.deepStrictEqual(
     routeForSession({ tmuxSocket: '/tmp/tmux', tmuxClient: '%3' }, 'darwin'),
@@ -306,6 +351,12 @@ async function main() {
   });
   assert(world.calls.some((c) => c[0] === 'setPetSize' && c[1][0] === 760));
   assert.strictEqual(world.elements('meme-image').src, '../assets/memes/huaqiang-guaranteed/visual.gif');
+  assert.strictEqual(
+    world.sandbox.memeMediaUrl({
+      media: { gif: 'huaqiang-guaranteed/visual.gif', version: 'asset-v2' },
+    }, 'gif'),
+    '../assets/memes/huaqiang-guaranteed/visual.gif?v=asset-v2',
+  );
   assert(world.elements('cat').classList.contains('sorry'));
   assert(world.elements('cat-img').src.endsWith('cat-waiting.gif'));
   world.handlers.event({ kind: 'user-turn', project: 'demo-session' });

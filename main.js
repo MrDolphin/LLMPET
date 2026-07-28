@@ -30,7 +30,7 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
-const { publicCatalog, getMeme } = require('./backend/meme-catalog');
+const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const transport = require('./backend/transport');
 const i18n = require('./shared/i18n');
@@ -57,6 +57,7 @@ let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
 let commandDispatcher = null;
+let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
 let petGuided = false; // 领地模式在带宠物走位:期间不把程序性移动当成用户拖拽持久化
 let petFrameGuided = false; // CoreGraphics 逐帧拖动期间的同步跟随
@@ -546,6 +547,20 @@ function scheduleEmit() {
 function broadcastConfig() {
   for (const st of petStates()) sendWin(st.win, 'pet:config', frontendConfig(st.agent));
   sendPanel('panel:config', frontendConfig('all'));
+}
+
+function startMemeWatcher() {
+  if (stopMemeWatcher) return;
+  stopMemeWatcher = watchCatalog({
+    onChange: (catalog) => {
+      log('meme', `resources hot-reloaded revision=${catalog.revision}`);
+      for (const st of petStates()) {
+        sendWin(st.win, 'pet:meme-catalog-changed', { revision: catalog.revision });
+      }
+    },
+    onError: (err) => log('meme', `resource reload rejected; keeping last good catalog: ${err.message}`),
+  });
+  log('meme', 'resource watcher started');
 }
 
 // ── backend wiring ────────────────────────────────────────────────────────────
@@ -1078,6 +1093,7 @@ if (!gotTheLock) {
     registerIpc();
     bootBackend();
     createPetWindows();
+    startMemeWatcher();
     bootTerritory();
     try { buildTray(); } catch (e) { log('main', 'tray unavailable:', e.message); }
     log('main', 'LLMPET ready');
@@ -1089,6 +1105,7 @@ app.on('window-all-closed', () => { /* tray app: stay alive */ });
 app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
+  try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}
   try { if (permissions) permissions.cleanup(); } catch {}
   try { if (server) server.stop(); } catch {}

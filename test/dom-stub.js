@@ -117,7 +117,7 @@ function createStubWorld() {
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)
-  const handlers = { event: null, stats: null, config: null, meme: null };
+  const handlers = { event: null, stats: null, config: null, meme: null, memeCatalogChanged: null };
   const calls = []; // record of preload calls for assertions
 
   const pet = {
@@ -125,6 +125,7 @@ function createStubWorld() {
     onStats: (cb) => { handlers.stats = cb; },
     onConfig: (cb) => { handlers.config = cb; },
     onMeme: (cb) => { handlers.meme = cb; },
+    onMemeCatalogChanged: (cb) => { handlers.memeCatalogChanged = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
     getMemeCatalog: () => Promise.resolve({ schemaVersion: 1, items: [] }),

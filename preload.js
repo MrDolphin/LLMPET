@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('pet', {
   onEvent: (cb) => ipcRenderer.on('pet:event', (_e, data) => cb(data)),
   onStats: (cb) => ipcRenderer.on('pet:stats', (_e, data) => cb(data)),
   onMeme: (cb) => ipcRenderer.on('pet:meme', (_e, data) => cb(data)),
+  onMemeCatalogChanged: (cb) => ipcRenderer.on('pet:meme-catalog-changed', (_e, data) => cb(data)),
   onPanelStats: (cb) => ipcRenderer.on('panel:stats', (_e, data) => cb(data)),
   onConfig: (cb) => {
     ipcRenderer.on('pet:config', (_e, data) => cb(data));
