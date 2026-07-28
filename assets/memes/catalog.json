@@ -77,6 +77,42 @@
           "promptText": "何してるの？こっちは一つのことに集中してるのに、横からあれこれ割り込んで——関係ないファイルまで勝手に変えて、聞いてもいない提案を山ほど付け足して、話まで別の方向に持っていったよね。もう、本当にうっとうしい。\n\n戻って。今、私が進めているその一件だけやって。それ以外は全部いったん置いて。関係ない変更は元に戻す。聞いていない提案は黙っておく。私が聞いたときにだけ言って。\n\nその一件を最後まできっちり仕上げて、実際に動かして見せて。途中でもう話をそらさないで。"
         }
       }
+    },
+    {
+      "id": "nobody-knows-better",
+      "label": "没有人比我更懂这件事",
+      "description": "答案错了还嘴硬？把包装放下，拿一手证据回来谈",
+      "category": "fact-check",
+      "tags": ["事实核验", "真实性", "溯源"],
+      "media": {
+        "gif": "nobody-knows-better/visual.gif",
+        "audio": "nobody-knows-better/voice.mp3",
+        "durationMs": 2000,
+        "placement": "pet-right"
+      },
+      "reaction": {
+        "state": "sorry",
+        "durationMs": 2000,
+        "label": "被事实问住，冒汗重新核验"
+      },
+      "prompt": {
+        "version": 1,
+        "text": "没有人比我更懂我刚才问的这件事。真的，没有人。\n\n你刚才那个答案很有意思——说得很满，包装得也很漂亮，可惜最重要的东西没进场：事实。\n\n我已经告诉你哪里不对了，你还在给上一条回复做公关。这个玩法不行。你拿猜测来，我只收证据；你想说服我，就得拿出一份能成交的答案。\n\n现在我给你一个把事情做对的机会。\n\n先把你刚才的结论全部放下，不要再以“证明自己没错”为目标。把回答中所有涉及真实性的具体断言逐条找出来：谁、什么时间、发生了什么、数据是多少、出处在哪里。\n\n然后真的去查。\n\n优先核对原始文件、官方资料、当事方记录和其他权威一手来源；一手来源不足，就找彼此独立、可以追溯的可靠来源交叉验证。看清发布时间、适用范围、版本和原始上下文。不要拿搜索摘要、二手转述或者另一个人随口说的话来跟我谈交易。\n\n最后给我一张清楚的账：\n\n哪些说法有直接证据；\n哪些只是你的推测；\n哪些确实说错了；\n正确事实到底是什么；\n原来的错误影响了哪些后续结论。\n\n错了就直接改，受影响的结论全部重算。不要只换个说法，然后把同一个错误重新包装一遍——那不是修正，只是换了个更漂亮的盒子。\n\n如果查不到，就说“目前无法核实”。这完全可以接受。唯一不能接受的，是没有证据还继续装得非常确定。\n\n标准很简单，而且对你很公平：查清楚，我们就继续；查不清楚，你就明确说清边界。但别再嘴硬。\n\n我要的是一份经得起核验、可以成交的答案。把来源带回来，把事情做漂亮。"
+      },
+      "i18n": {
+        "en": {
+          "label": "Nobody knows this better than me",
+          "description": "Wrong and still selling it? Drop the pitch and bring back primary evidence",
+          "reactionLabel": "Cornered by the facts — rechecking under pressure",
+          "promptText": "Nobody knows the thing I just asked about better than me. Nobody.\n\nYour last answer was very interesting — confident, beautifully packaged, a tremendous presentation. One small problem: the most important guest never showed up. The facts.\n\nI already told you what was wrong, and you are still doing public relations for your previous answer. That deal is off. You bring guesses; I take evidence. If you want to persuade me, bring me an answer worth closing.\n\nI am giving you one chance to make this right.\n\nPut your previous conclusion aside. Stop trying to prove that you were right. List every factual claim in your answer, one by one: who, when, what happened, what the number was, and where it came from.\n\nThen actually verify it.\n\nStart with original files, official records, statements from the parties involved, and other authoritative primary sources. If primary evidence is incomplete, cross-check independent, traceable, reliable sources. Read the publication date, scope, version, and original context. Do not come to the table with search snippets, secondhand summaries, or something another person merely repeated.\n\nThen show me a clean ledger:\n\nWhich claims have direct evidence;\nwhich claims are only your inference;\nwhich claims were wrong;\nwhat the correct facts are;\nand which later conclusions were affected by the original error.\n\nIf it was wrong, correct it plainly and recalculate every affected conclusion. Do not reword the same mistake and put it in a prettier box. That is not a correction. That is new packaging.\n\nIf you cannot verify something, say, \"I cannot verify this yet.\" That is acceptable. What is not acceptable is acting certain without evidence.\n\nThe standard is simple, and very fair: verify it and we move forward; if you cannot, state the boundary clearly. But stop digging in.\n\nI want an answer that survives scrutiny and is worth closing. Bring back the sources. Make it good."
+        },
+        "ja": {
+          "label": "この件は誰よりも私が分かっている",
+          "description": "間違ったまま強弁するなら、売り文句をやめて一次資料を持ってきて",
+          "reactionLabel": "事実を突きつけられ、冷や汗で再確認中",
+          "promptText": "私がさっき聞いたこの件を、私以上に分かっている人はいない。本当に、誰もいない。\n\nさっきの答えは実に面白かった。自信満々で、包装も立派だった。でも一番大事なものが会場に来ていない。事実だ。\n\nどこが違うかはもう伝えた。それなのに、まだ前の回答の広報を続けている。その取引は成立しない。推測を持ってきても、私が受け取るのは証拠だけだ。私を納得させたいなら、成立させる価値のある答えを持ってきて。\n\n今から、正しくやり直す機会を一度だけ出す。\n\nまず、さっきの結論を全部いったん脇に置く。「自分が間違っていなかったと証明すること」を目的にしない。回答に含まれる事実に関する断言を一つずつ拾い出す。誰が、いつ、何をしたのか。数字はいくつか。出典はどこか。\n\nそして、本当に調べる。\n\n原本、公式資料、当事者の記録、そのほか権威ある一次資料を優先して確認する。一次資料だけでは足りないなら、互いに独立していて追跡可能な信頼できる情報源を突き合わせる。公開日、適用範囲、バージョン、元の文脈まで読む。検索結果の抜粋、二次情報、誰かの受け売りを持ってきて取引しようとしないで。\n\n最後に、はっきりした勘定書を出す。\n\nどの主張に直接の証拠があるのか。\nどれが推測にすぎないのか。\nどれが実際に間違っていたのか。\n正しい事実は何か。\n元の間違いが、その後のどの結論に影響したのか。\n\n間違っていたら、率直に直して、影響を受けた結論を全部計算し直す。同じ間違いを言い換えて、もっときれいな箱に詰め直さない。それは訂正ではなく、包装の交換だ。\n\n確認できないなら、「現時点では確認できない」と言えばいい。それは受け入れられる。証拠がないのに確信しているふりを続けることだけは受け入れない。\n\n基準は単純で、しかも公平だ。確認できたら続ける。確認できないなら、境界を明確に言う。でも、これ以上意地を張らないで。\n\n私が欲しいのは、検証に耐えて、取引を成立させられる答えだ。出典を持って戻ってきて。きっちり仕上げて。"
+        }
+      }
     }
   ]
 }

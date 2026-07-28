@@ -17,7 +17,7 @@ async function main() {
   const root = path.join(__dirname, '..');
   const catalog = loadCatalog();
   assert.strictEqual(catalog.schemaVersion, 1);
-  assert.strictEqual(catalog.items.length, 2);
+  assert.strictEqual(catalog.items.length, 3);
   for (const item of catalog.items) {
     assert(item.media.gif.startsWith(item.id + '/'), `${item.id}: gif must live in its own directory`);
     assert(item.media.audio.startsWith(item.id + '/'), `${item.id}: audio must live in its own directory`);
@@ -65,6 +65,22 @@ async function main() {
   assert.strictEqual(niGanMa.reaction.durationMs, 4400);
   assert(!JSON.stringify(publicCatalog()).includes(niGanMa.prompt.text), 'renderer catalog must not expose the ni-gan-ma prompt');
 
+  const nobodyKnowsBetter = getMeme('nobody-knows-better');
+  assert(nobodyKnowsBetter);
+  assert.strictEqual(nobodyKnowsBetter.prompt.version, 1);
+  assert(nobodyKnowsBetter.prompt.text.startsWith('没有人比我更懂我刚才问的这件事'));
+  assert(nobodyKnowsBetter.prompt.text.includes('你拿猜测来，我只收证据'));
+  assert(nobodyKnowsBetter.prompt.text.includes('然后真的去查'));
+  assert(nobodyKnowsBetter.prompt.text.includes('哪些说法有直接证据'));
+  assert(nobodyKnowsBetter.prompt.text.includes('别再嘴硬'));
+  assert.strictEqual(nobodyKnowsBetter.reaction.state, 'sorry');
+  assert.strictEqual(nobodyKnowsBetter.reaction.durationMs, 2000);
+  assert(nobodyKnowsBetter.i18n.en.promptText.includes('Nobody knows the thing I just asked about better than me'));
+  assert(nobodyKnowsBetter.i18n.en.promptText.includes('bring me an answer worth closing'));
+  assert(nobodyKnowsBetter.i18n.ja.promptText.includes('事実だ'));
+  assert(!JSON.stringify(publicCatalog()).includes(nobodyKnowsBetter.prompt.text),
+    'renderer catalog must not expose the nobody-knows-better prompt');
+
   // Resource-only edits must become visible without restarting the backend.
   const hotRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'llmpet-memes-hot-'));
   const hotItemDir = path.join(hotRoot, 'hot-item');
@@ -85,10 +101,10 @@ async function main() {
   fs.writeFileSync(hotCatalogPath, JSON.stringify(hotRaw));
   const hotStore = createCatalogStore({ catalogPath: hotCatalogPath, pollMs: 20 });
   const hotV1 = hotStore.publicCatalog();
-  hotRaw.items[0].label = 'v2';
+  hotRaw.items[0].label = 'v2-updated';
   fs.writeFileSync(hotCatalogPath, JSON.stringify(hotRaw));
   const hotV2 = hotStore.publicCatalog();
-  assert.strictEqual(hotV2.items[0].label, 'v2', 'catalog edits must reload on demand');
+  assert.strictEqual(hotV2.items[0].label, 'v2-updated', 'catalog edits must reload on demand');
   assert.notStrictEqual(hotV2.revision, hotV1.revision, 'catalog edit must change the public revision');
   const mediaV1 = hotV2.items[0].media.version;
   fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), 'gif-v2-is-longer');
