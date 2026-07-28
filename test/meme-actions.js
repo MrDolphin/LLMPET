@@ -17,7 +17,7 @@ async function main() {
   const root = path.join(__dirname, '..');
   const catalog = loadCatalog();
   assert.strictEqual(catalog.schemaVersion, 1);
-  assert.strictEqual(catalog.items.length, 3);
+  assert.strictEqual(catalog.items.length, 4);
   for (const item of catalog.items) {
     assert(item.media.gif.startsWith(item.id + '/'), `${item.id}: gif must live in its own directory`);
     assert(item.media.audio.startsWith(item.id + '/'), `${item.id}: audio must live in its own directory`);
@@ -80,6 +80,23 @@ async function main() {
   assert(nobodyKnowsBetter.i18n.ja.promptText.includes('事実だ'));
   assert(!JSON.stringify(publicCatalog()).includes(nobodyKnowsBetter.prompt.text),
     'renderer catalog must not expose the nobody-knows-better prompt');
+
+  const focusOnImportantThings = getMeme('focus-on-important-things');
+  assert(focusOnImportantThings);
+  assert.strictEqual(focusOnImportantThings.prompt.version, 1);
+  assert(focusOnImportantThings.prompt.text.startsWith('我现在要把精力放到其他更重要的事情上'));
+  assert(focusOnImportantThings.prompt.text.includes('那还叫全权交给你吗'));
+  assert(focusOnImportantThings.prompt.text.includes('发现当前路线不通就换一条继续'));
+  assert(focusOnImportantThings.prompt.text.includes('只有三种情况可以中途叫我'));
+  assert(focusOnImportantThings.prompt.text.endsWith('我还要把精力放到其他更重要的事情上。'));
+  assert.strictEqual(focusOnImportantThings.media.durationMs, 11800);
+  assert.strictEqual(focusOnImportantThings.reaction.state, 'working');
+  assert.strictEqual(focusOnImportantThings.reaction.durationMs, 11800);
+  assert(focusOnImportantThings.i18n.en.promptText.includes('other, more important matters'));
+  assert(focusOnImportantThings.i18n.en.promptText.includes('Routine problems do not require escalation'));
+  assert(focusOnImportantThings.i18n.ja.promptText.includes('ほかのもっと重要なこと'));
+  assert(!JSON.stringify(publicCatalog()).includes(focusOnImportantThings.prompt.text),
+    'renderer catalog must not expose the focus-on-important-things prompt');
 
   // Resource-only edits must become visible without restarting the backend.
   const hotRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'llmpet-memes-hot-'));
