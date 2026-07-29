@@ -19,6 +19,7 @@ const http = require('http');
 
 const SERVER_ID = 'octopus';
 const SERVER_HEADER = 'x-octopus-server';
+const TOKEN_HEADER = 'x-octopus-token';
 const BASE_PORT = 41330;
 const PORT_COUNT = 5;
 const PORTS = Array.from({ length: PORT_COUNT }, (_, i) => BASE_PORT + i);
@@ -32,23 +33,41 @@ function inRange(port) {
   return Number.isInteger(p) && PORTS.includes(p) ? p : null;
 }
 
-function readRuntimePort() {
+function validToken(token) {
+  return typeof token === 'string' && /^[a-f0-9]{48,128}$/i.test(token) ? token : null;
+}
+
+function readRuntimeConfig() {
   try {
     const obj = JSON.parse(fs.readFileSync(RUNTIME_PATH, 'utf8'));
-    return inRange(obj && obj.port);
+    const port = inRange(obj && obj.port);
+    const token = validToken(obj && obj.token);
+    return obj && obj.app === SERVER_ID && port && token ? { app: SERVER_ID, port, token } : null;
   } catch {
     return null;
   }
 }
 
-function writeRuntimeConfig(port) {
+function readRuntimePort() {
+  const runtime = readRuntimeConfig();
+  return runtime ? runtime.port : null;
+}
+
+function readRuntimeToken() {
+  const runtime = readRuntimeConfig();
+  return runtime ? runtime.token : null;
+}
+
+function writeRuntimeConfig(port, token) {
   const p = inRange(port);
-  if (!p) return false;
+  const t = validToken(token);
+  if (!p || !t) return false;
   try {
     fs.mkdirSync(path.dirname(RUNTIME_PATH), { recursive: true });
     const tmp = path.join(path.dirname(RUNTIME_PATH), `.runtime.${process.pid}.${Date.now()}.tmp`);
-    fs.writeFileSync(tmp, JSON.stringify({ app: SERVER_ID, port: p }), 'utf8');
+    fs.writeFileSync(tmp, JSON.stringify({ app: SERVER_ID, port: p, token: t }), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmp, RUNTIME_PATH);
+    try { fs.chmodSync(RUNTIME_PATH, 0o600); } catch {}
     return true;
   } catch {
     return false;
@@ -68,8 +87,10 @@ function getPortCandidates() {
   return out;
 }
 
-function buildPermissionUrl(port) {
-  return `http://127.0.0.1:${inRange(port) || BASE_PORT}${PERMISSION_PATH}`;
+function buildPermissionUrl(port, token) {
+  const base = `http://127.0.0.1:${inRange(port) || BASE_PORT}${PERMISSION_PATH}`;
+  const t = validToken(token);
+  return t ? `${base}?token=${encodeURIComponent(t)}` : base;
 }
 
 function headerIsOurs(res) {
@@ -91,6 +112,8 @@ function probe(port, timeoutMs, cb) {
 // the hook must not block Claude Code, so it gives up quickly on each port.
 function postState(body, cb) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
+  const runtime = readRuntimeConfig();
+  if (!runtime) { cb && cb(false); return; }
   const ports = getPortCandidates();
   let i = 0;
   const tryNext = () => {
@@ -100,10 +123,14 @@ function postState(body, cb) {
       {
         hostname: '127.0.0.1', port, path: STATE_PATH, method: 'POST',
         timeout: POST_TIMEOUT_MS,
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          [TOKEN_HEADER]: runtime.token,
+        },
       },
       (res) => {
-        const ok = headerIsOurs(res);
+        const ok = headerIsOurs(res) && res.statusCode >= 200 && res.statusCode < 300;
         res.resume();
         if (ok) cb && cb(true, port);
         else tryNext();
@@ -186,7 +213,7 @@ function resolveWinNode() {
 }
 
 module.exports = {
-  SERVER_ID, SERVER_HEADER, PORTS, BASE_PORT, STATE_PATH, PERMISSION_PATH, RUNTIME_PATH,
-  inRange, readRuntimePort, writeRuntimeConfig, clearRuntimeConfig,
+  SERVER_ID, SERVER_HEADER, TOKEN_HEADER, PORTS, BASE_PORT, STATE_PATH, PERMISSION_PATH, RUNTIME_PATH,
+  inRange, validToken, readRuntimeConfig, readRuntimePort, readRuntimeToken, writeRuntimeConfig, clearRuntimeConfig,
   getPortCandidates, buildPermissionUrl, headerIsOurs, probe, postState, resolveNodeBin,
 };

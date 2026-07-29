@@ -128,7 +128,7 @@ function createStubWorld() {
     onMemeCatalogChanged: (cb) => { handlers.memeCatalogChanged = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
-    getMemeCatalog: () => Promise.resolve({ schemaVersion: 1, items: [] }),
+    getMemeCatalog: () => Promise.resolve({ schemaVersion: 2, items: [] }),
     triggerMeme: (...a) => { calls.push(['triggerMeme', a]); return Promise.resolve({ ok: true, submitted: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
     setWinPos: (...a) => calls.push(['setWinPos', a]),

@@ -11,9 +11,9 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Live agent state** — see thinking, working, parallel subagents, context cleanup, waiting, errors, completion, and idle time as pet animations.
 - **Claude Code approvals** — allow or deny a Claude Code permission request directly from the pet.
 - **Claude Code + Codex sessions** — one pet can watch both backends, or you can enable separate Claude and Codex pets with independent skins and positions.
-- **Session switcher** — click the pet to open a scrollable session list, inspect context usage, and bring the selected terminal or desktop session forward.
+- **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
-- **Usage dashboard** — inspect token history, model breakdowns, Claude cost estimates, Codex rate-limit windows, background processes, and live operations.
+- **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
 - **Three skins** — Octopus 🐙, Pixel Monster 👾, and Salary Cat 🐱.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
 
@@ -70,7 +70,7 @@ LLMPET registers merge-safe lifecycle and permission hooks in `~/.claude/setting
 
 - Lifecycle events such as `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and `SubagentStart` are sent to a local server bound to `127.0.0.1`.
 - Permission requests stay open until the user chooses allow or deny.
-- Local transcripts are scanned incrementally for token counts, model IDs, and timestamps. Assistant text is only read when needed for the short reply bubble.
+- Local transcripts are scanned incrementally for token counts, model IDs, and timestamps. Streamed usage snapshots are merged by positive delta, and 5-minute / 1-hour cache writes are priced separately. Assistant text is only read when needed for the short reply bubble.
 
 ### OpenAI Codex
 
@@ -80,7 +80,7 @@ LLMPET does not install Codex hooks. It incrementally and read-only tails:
 ~/.codex/sessions/YYYY/MM/DD/*.jsonl
 ```
 
-It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and reads Codex rate-limit windows when available.
+It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
 
 ## Meme actions
 
@@ -92,7 +92,7 @@ assets/memes/<meme-id>/
   voice.mp3
 ```
 
-The catalog keeps the label, description, playback behavior, pet reaction, prompt version, and localized prompt together. Selecting a meme plays the media beside the pet and sends the matching prompt to the selected Claude or Codex session.
+The catalog keeps the label, description, playback behavior, pet reaction, prompt version, localized prompt, and source/licensing status together. GIF/MP3 formats and size limits are validated, while content hashes make resource replacements visible without restarting. See [`assets/memes/README.md`](assets/memes/README.md).
 
 The localized prompts are adapted to the culture of each language rather than translated word for word. For example, the Chinese “你这瓜保熟吗？” challenge becomes **“Source: trust me bro?”** in English because both jokes serve the same purpose: demanding proof instead of an unverified claim.
 
@@ -109,7 +109,7 @@ Patrol mode is currently macOS-only.
 
 ## Privacy and security
 
-- The HTTP server binds only to `127.0.0.1` and validates loopback requests.
+- The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
 - Codex rollout access is read-only.
 - Pricing is the only optional network fetch: once every 24 hours LLMPET downloads public LiteLLM pricing data. Set `OCTOPUS_NO_NET=1` for fully offline mode.

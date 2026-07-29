@@ -113,6 +113,16 @@
           <span class="sl-close" id="sl-close" data-i18n-title="sess.close" title="关闭">✕</span>
         </div>
         <div id="sl-session-view">
+          <div class="sl-tools">
+            <input id="sl-search" type="search" data-i18n-ph="sess.search" placeholder="搜索会话…" autocomplete="off" />
+            <div id="sl-filters" class="sl-filters" role="group" data-i18n-aria="sess.filters">
+              <button class="active" data-filter="all" data-i18n="sess.filterAll">全部</button>
+              <button data-filter="claude">Claude</button>
+              <button data-filter="codex">Codex</button>
+              <button data-filter="attention" data-i18n="sess.filterAttention">待处理</button>
+              <button id="sl-archived-toggle" data-i18n="sess.showArchived">归档</button>
+            </div>
+          </div>
           <div class="sl-scroll" id="sl-rows"></div>
           <div class="sl-foot">
             <button id="sl-new" data-i18n="sess.newClaude">🚀 新开 Claude</button>

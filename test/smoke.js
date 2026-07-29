@@ -25,13 +25,18 @@ const permissions = createPermissions({
 });
 const server = createServer({ core, permissions, shouldDropForDnd: () => false });
 
-function postAbortable(pathName, body) {
+function postAbortable(pathName, body, options = {}) {
   let req;
   const settled = new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
+    const authenticated = options.auth !== false;
+    const requestPath = authenticated && pathName === '/permission'
+      ? `${pathName}?token=${encodeURIComponent(server.getToken())}`
+      : pathName;
+    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) };
+    if (authenticated && pathName === '/state') headers['x-octopus-token'] = server.getToken();
     req = http.request(
-      { hostname: '127.0.0.1', port: server.getPort(), path: pathName, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
+      { hostname: '127.0.0.1', port: server.getPort(), path: requestPath, method: 'POST', headers },
       (res) => {
         let data = '';
         res.on('data', (c) => (data += c));
@@ -44,8 +49,8 @@ function postAbortable(pathName, body) {
   return { req, settled };
 }
 
-function post(pathName, body) {
-  return postAbortable(pathName, body).settled;
+function post(pathName, body, options) {
+  return postAbortable(pathName, body, options).settled;
 }
 
 function get(pathName) {
@@ -81,8 +86,20 @@ async function main() {
     assert.strictEqual(health.headers['x-octopus-server'], 'octopus');
   });
 
+  console.log('\n[1b] write endpoints require the per-run token');
+  let r = await post('/state', { state: 'idle', event: 'SessionStart', session_id: 'forged' }, { auth: false });
+  check('unauthenticated state write → 403', () => {
+    assert.strictEqual(r.status, 403);
+    assert.strictEqual(core.getSession('forged'), null);
+  });
+  r = await post('/permission', { tool_name: 'Bash', tool_input: {}, session_id: 'forged' }, { auth: false });
+  check('unauthenticated permission write → 403', () => {
+    assert.strictEqual(r.status, 403);
+    assert.strictEqual(permissions.getPending().length, 0);
+  });
+
   console.log('\n[2] session lifecycle via /state');
-  let r = await post('/state', { state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x' });
+  r = await post('/state', { state: 'idle', event: 'SessionStart', session_id: SID, cwd: '/Users/me/proj-x' });
   check('SessionStart accepted', () => { assert.strictEqual(r.status, 200); assert.strictEqual(r.headers['x-octopus-server'], 'octopus'); });
 
   r = await post('/state', { state: 'thinking', event: 'UserPromptSubmit', session_id: SID, cwd: '/Users/me/proj-x' });

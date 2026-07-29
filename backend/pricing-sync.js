@@ -58,7 +58,8 @@ function extractFamilies(table) {
     const row = {
       input: toMTok(m.input_cost_per_token),
       output: toMTok(m.output_cost_per_token),
-      cacheWrite: toMTok(m.cache_creation_input_token_cost),
+      cacheWrite5m: toMTok(m.cache_creation_input_token_cost),
+      cacheWrite1h: null,
       cacheRead: toMTok(m.cache_read_input_token_cost),
     };
     if (Object.values(row).every((v) => v == null)) continue;
@@ -66,7 +67,8 @@ function extractFamilies(table) {
     fams[fam] = {
       input: row.input != null ? row.input : (fams[fam] ? fams[fam].input : null),
       output: row.output != null ? row.output : (fams[fam] ? fams[fam].output : null),
-      cacheWrite: row.cacheWrite != null ? row.cacheWrite : (fams[fam] ? fams[fam].cacheWrite : null),
+      cacheWrite5m: row.cacheWrite5m != null ? row.cacheWrite5m : (fams[fam] ? fams[fam].cacheWrite5m : null),
+      cacheWrite1h: row.input != null ? row.input * 2 : (fams[fam] ? fams[fam].cacheWrite1h : null),
       cacheRead: row.cacheRead != null ? row.cacheRead : (fams[fam] ? fams[fam].cacheRead : null),
     };
   }
@@ -76,7 +78,14 @@ function extractFamilies(table) {
   for (const [fam, row] of Object.entries(fams)) {
     if (!row) continue;
     if (row.input == null && row.output == null) continue;
-    out[fam] = { input: r(row.input), output: r(row.output), cacheWrite: r(row.cacheWrite), cacheRead: r(row.cacheRead) };
+    const input = r(row.input);
+    out[fam] = {
+      input,
+      output: r(row.output),
+      cacheWrite5m: r(row.cacheWrite5m != null ? row.cacheWrite5m : input == null ? null : input * 1.25),
+      cacheWrite1h: r(row.cacheWrite1h != null ? row.cacheWrite1h : input == null ? null : input * 2),
+      cacheRead: r(row.cacheRead != null ? row.cacheRead : input == null ? null : input * 0.1),
+    };
   }
   return out;
 }
@@ -99,11 +108,20 @@ function extractModels(table) {
     const input = toMTok(m.input_cost_per_token);
     const output = toMTok(m.output_cost_per_token);
     if (input == null && output == null) continue;
-    let cacheWrite = toMTok(m.cache_creation_input_token_cost);
+    let cacheWrite5m = toMTok(m.cache_creation_input_token_cost);
     let cacheRead = toMTok(m.cache_read_input_token_cost);
-    if (cacheWrite == null && input != null) cacheWrite = input * 1.25; // Anthropic standard ratios
+    if (cacheWrite5m == null && input != null) cacheWrite5m = input * 1.25; // Anthropic standard ratios
     if (cacheRead == null && input != null) cacheRead = input * 0.1;
-    out[id] = { input: r(input), output: r(output), cacheWrite: r(cacheWrite), cacheRead: r(cacheRead) };
+    out[id] = {
+      input: r(input),
+      output: r(output),
+      cacheWrite5m: r(cacheWrite5m),
+      cacheWrite1h: r(input == null ? null : input * 2),
+      cacheRead: r(cacheRead),
+      contextWindow: Number.isFinite(m.max_input_tokens)
+        ? Math.floor(m.max_input_tokens)
+        : Number.isFinite(m.max_tokens) ? Math.floor(m.max_tokens) : null,
+    };
   }
   return out;
 }

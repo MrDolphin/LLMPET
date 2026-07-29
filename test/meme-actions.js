@@ -16,13 +16,14 @@ const { loadRenderer } = require('./dom-stub');
 async function main() {
   const root = path.join(__dirname, '..');
   const catalog = loadCatalog();
-  assert.strictEqual(catalog.schemaVersion, 1);
+  assert.strictEqual(catalog.schemaVersion, 2);
   assert.strictEqual(catalog.items.length, 4);
   for (const item of catalog.items) {
     assert(item.media.gif.startsWith(item.id + '/'), `${item.id}: gif must live in its own directory`);
     assert(item.media.audio.startsWith(item.id + '/'), `${item.id}: audio must live in its own directory`);
     assert(fs.existsSync(path.join(root, 'assets', 'memes', item.media.gif)));
     assert(fs.existsSync(path.join(root, 'assets', 'memes', item.media.audio)));
+    assert(item.provenance && item.provenance.license, `${item.id}: provenance is required`);
   }
   const meme = getMeme('huaqiang-guaranteed');
   assert(meme);
@@ -103,13 +104,20 @@ async function main() {
   const hotItemDir = path.join(hotRoot, 'hot-item');
   const hotCatalogPath = path.join(hotRoot, 'catalog.json');
   fs.mkdirSync(hotItemDir, { recursive: true });
-  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), 'gif-v1');
-  fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), 'audio-v1');
+  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), Buffer.from('GIF89a-gif-v1'));
+  fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), Buffer.from('ID3audio-v1'));
   const hotRaw = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     items: [{
       id: 'hot-item',
       label: 'v1',
+      provenance: {
+        origin: 'test',
+        creator: 'test',
+        sourceUrl: null,
+        license: 'cleared',
+        commercialUse: true,
+      },
       media: { gif: 'hot-item/visual.gif', audio: 'hot-item/voice.mp3' },
       prompt: { version: 1, text: 'hot prompt' },
       reaction: { state: 'puzzled' },
@@ -124,7 +132,7 @@ async function main() {
   assert.strictEqual(hotV2.items[0].label, 'v2-updated', 'catalog edits must reload on demand');
   assert.notStrictEqual(hotV2.revision, hotV1.revision, 'catalog edit must change the public revision');
   const mediaV1 = hotV2.items[0].media.version;
-  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), 'gif-v2-is-longer');
+  fs.writeFileSync(path.join(hotItemDir, 'visual.gif'), Buffer.from('GIF89a-gif-v2-is-longer'));
   const mediaV2 = hotStore.publicCatalog().items[0].media.version;
   assert.notStrictEqual(mediaV2, mediaV1, 'media replacement must bust the renderer cache');
   await new Promise((resolve, reject) => {
@@ -137,7 +145,7 @@ async function main() {
         resolve();
       },
     });
-    fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), 'audio-v2-is-longer');
+    fs.writeFileSync(path.join(hotItemDir, 'voice.mp3'), Buffer.from('ID3audio-v2-is-longer'));
   });
   fs.rmSync(hotRoot, { recursive: true, force: true });
 

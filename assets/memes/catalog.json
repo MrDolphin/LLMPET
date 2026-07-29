@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "items": [
     {
       "id": "huaqiang-guaranteed",
@@ -7,6 +7,14 @@
       "description": "用户耐心快耗尽了：别卖生瓜蛋子，当场劈开验货",
       "category": "delivery-review",
       "tags": ["验收", "复盘", "PUA"],
+      "provenance": {
+        "origin": "user-supplied",
+        "creator": "unknown",
+        "sourceUrl": null,
+        "license": "unverified",
+        "commercialUse": false,
+        "notes": "User-provided edited media; redistribution rights have not been independently verified."
+      },
       "media": {
         "gif": "huaqiang-guaranteed/visual.gif",
         "audio": "huaqiang-guaranteed/voice.mp3",
@@ -48,6 +56,14 @@
       "description": "范围又跑偏了：回来，只做当前这一件事",
       "category": "scope-control",
       "tags": ["范围控制", "专注", "返工"],
+      "provenance": {
+        "origin": "user-supplied",
+        "creator": "unknown",
+        "sourceUrl": null,
+        "license": "unverified",
+        "commercialUse": false,
+        "notes": "User-provided edited media; redistribution rights have not been independently verified."
+      },
       "media": {
         "gif": "ni-gan-ma/visual.gif",
         "audio": "ni-gan-ma/voice.mp3",
@@ -84,6 +100,14 @@
       "description": "答案错了还嘴硬？把包装放下，拿一手证据回来谈",
       "category": "fact-check",
       "tags": ["事实核验", "真实性", "溯源"],
+      "provenance": {
+        "origin": "user-supplied",
+        "creator": "unknown",
+        "sourceUrl": null,
+        "license": "unverified",
+        "commercialUse": false,
+        "notes": "User-provided edited media; redistribution rights have not been independently verified."
+      },
       "media": {
         "gif": "nobody-knows-better/visual.gif",
         "audio": "nobody-knows-better/voice.mp3",
@@ -120,6 +144,14 @@
       "description": "我去处理更重要的事：这件事全权交给 AI，一次执行到底",
       "category": "full-delegation",
       "tags": ["全权委托", "连续执行", "自主完成"],
+      "provenance": {
+        "origin": "user-supplied",
+        "creator": "unknown",
+        "sourceUrl": null,
+        "license": "unverified",
+        "commercialUse": false,
+        "notes": "User-provided edited media; redistribution rights have not been independently verified."
+      },
       "media": {
         "gif": "focus-on-important-things/visual.gif",
         "audio": "focus-on-important-things/voice.mp3",

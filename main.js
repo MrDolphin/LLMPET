@@ -30,6 +30,7 @@ const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
 const { launchClaude, launchCodex } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
+const { createCodexMetering } = require('./backend/codex-metering');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const transport = require('./backend/transport');
@@ -56,6 +57,7 @@ let server = null;
 let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
+let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
 let commandDispatcher = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
@@ -96,6 +98,8 @@ function frontendConfig(agent = 'all') {
     agent,
     petMode: c.petMode,
     lang: c.lang,
+    pinnedSessions: c.pinnedSessions,
+    archivedSessions: c.archivedSessions,
   };
 }
 
@@ -511,12 +515,18 @@ function filterSnapshot(snap, agent) {
 function buildStats(agent = 'all', snapshot = null) {
   const snap = filterSnapshot(snapshot || core.buildSnapshot(), agent);
   const meter = metering ? metering.getStats() : null;
+  const codexUsage = codexMetering ? codexMetering.getStats() : null;
   // 授权（HTTP 阻塞钩子）只存在于 Claude 路径；Codex 宠不认领
   const pending = agent === 'codex' ? [] : permissions.getPending();
   const ops = (agent === 'all'
     ? recentOps
     : recentOps.filter((o) => (o.agent || 'claude') === agent)).slice(0, 30);
-  return adapter.buildPetStats(snap, pending, meter, { lastOps: ops, codexLimits });
+  return adapter.buildPetStats(snap, pending, meter, {
+    lastOps: ops,
+    codexLimits,
+    codexUsage,
+    usageProvider: agent === 'codex' ? 'codex' : 'claude',
+  });
 }
 
 // Record operation/say events into the ring the panel renders as the op stream.
@@ -587,6 +597,10 @@ function bootBackend() {
   if (process.env.LLMPET_NO_CODEX === '1') {
     log('main', 'LLMPET_NO_CODEX=1 — Codex watcher disabled');
   } else {
+    codexMetering = createCodexMetering({
+      sessionsDir: process.env.LLMPET_CODEX_DIR || undefined,
+    });
+    codexMetering.start(30000);
     codexWatch = createCodexWatch({
       core,
       // 开发/E2E 可用 LLMPET_CODEX_DIR 指到假目录，不碰真实 ~/.codex
@@ -665,8 +679,8 @@ function bootBackend() {
     }
     const port = server.getPort();
     if (port) {
-      hooks.install(port);
-      stopWatcher = hooks.startWatcher(() => server.getPort());
+      hooks.install(port, server.getToken());
+      stopWatcher = hooks.startWatcher(() => ({ port: server.getPort(), token: server.getToken() }));
     } else {
       log('main', 'server has no port — hooks not installed (ports busy?)');
     }
@@ -733,6 +747,10 @@ function registerIpc() {
   ipcMain.on('set-skin', (e, skin) => applySkin(skin, senderAgent(e) === 'codex' ? 'codex' : null));
   ipcMain.on('set-budget', (_e, v) => { config.save({ budget5h: Number(v) || 0 }); broadcastConfig(); });
   ipcMain.on('toggle-mute', () => { config.save({ muted: !config.get().muted }); broadcastConfig(); refreshTrayMenu(); });
+  ipcMain.on('set-session-prefs', (_e, pinnedSessions, archivedSessions) => {
+    config.save({ pinnedSessions, archivedSessions });
+    broadcastConfig();
+  });
   ipcMain.on('territory-run-now', runTerritoryNow);
   ipcMain.on('territory-toggle-auto', () => applyTerritory(!config.get().territory));
 
@@ -1110,6 +1128,7 @@ app.on('before-quit', () => {
   try { if (permissions) permissions.cleanup(); } catch {}
   try { if (server) server.stop(); } catch {}
   try { if (metering) metering.stop(); } catch {}
+  try { if (codexMetering) codexMetering.stop(); } catch {}
   try { if (pricingSync) pricingSync.stop(); } catch {}
   try { if (core) core.stopStaleCleanup(); } catch {}
   log('main', 'LLMPET quit');

@@ -25,9 +25,19 @@ const DEFAULTS = Object.freeze({
   skinCodex: 'cat',       // 双宠模式里 Codex 宠的形象（和主形象错开才认得出谁是谁）
   petPositionCodex: null, // {x,y} | null — Codex 宠的落脚点
   lang: 'zh',             // 'zh' | 'en' | 'ja' — 界面与表情包文案语言
+  pinnedSessions: [],     // 会话 HUD 置顶项（按稳定 session id）
+  archivedSessions: [],   // 会话 HUD 归档项（不影响后端任务本身）
 });
 
 let cache = null;
+
+function sanitizeSessionIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((id) => typeof id === 'string' && id.trim())
+    .map((id) => id.trim().slice(0, 256)))]
+    .slice(0, 300);
+}
 
 function sanitize(raw) {
   const out = { ...DEFAULTS };
@@ -53,6 +63,9 @@ function sanitize(raw) {
     out.petPositionCodex = { x: Math.round(raw.petPositionCodex.x), y: Math.round(raw.petPositionCodex.y) };
   }
   if (['zh', 'en', 'ja'].includes(raw.lang)) out.lang = raw.lang;
+  out.pinnedSessions = sanitizeSessionIds(raw.pinnedSessions);
+  out.archivedSessions = sanitizeSessionIds(raw.archivedSessions)
+    .filter((id) => !out.pinnedSessions.includes(id));
   return out;
 }
 
@@ -60,6 +73,7 @@ function load() {
   if (cache) return cache;
   try {
     cache = sanitize(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
+    try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
   } catch {
     cache = { ...DEFAULTS };
   }
@@ -71,8 +85,9 @@ function save(partial) {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     const tmp = path.join(CONFIG_DIR, `.config.${process.pid}.${Date.now()}.tmp`);
-    fs.writeFileSync(tmp, JSON.stringify(cache, null, 2), 'utf8');
+    fs.writeFileSync(tmp, JSON.stringify(cache, null, 2), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmp, CONFIG_PATH);
+    try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
   } catch (err) {
     log('config', 'save failed:', err.message);
   }
@@ -81,4 +96,4 @@ function save(partial) {
 
 function get() { return load(); }
 
-module.exports = { get, save, CONFIG_PATH, DEFAULTS };
+module.exports = { get, save, sanitize, CONFIG_PATH, DEFAULTS };

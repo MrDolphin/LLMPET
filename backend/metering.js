@@ -5,13 +5,13 @@
 // Claude Code writes a transcript JSONL per session under
 //   ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
 // Each assistant turn line carries message.usage (input / output / cache tokens)
-// and message.model. We incrementally tail every transcript (byte cursor per
-// file), dedupe each assistant message by message.id (the SAME id is written on
-// multiple streaming lines — double-counting if not deduped), attribute the
-// usage to its local day/hour/model by the line timestamp, and price it with a
-// per-model-family table. Aggregates persist to ~/.octopus/usage.json so history
-// (the 90-day calendar) survives restarts; the first run backfills from the
-// existing transcripts (last 95 days).
+// and message.model. Claude writes the SAME message id several times while the
+// response streams; later rows contain the completed output token count. We keep
+// the component-wise maximum snapshot per message and apply only the positive
+// delta, so neither the first partial row nor a resumed/copied transcript can
+// under-count or double-count usage. Aggregates persist to ~/.octopus/usage.json
+// so history (the 90-day calendar) survives restarts; the first run backfills
+// from the existing transcripts (last 95 days).
 //
 // Same idea as the ccusage tool: read only token counts + model + timestamps
 // from the transcripts (never message content), then price them.
@@ -33,17 +33,18 @@ const WINDOW_MS = 5 * 60 * 60 * 1000;     // Claude's 5h rate window (approx)
 const DAILY_KEEP_DAYS = 95;
 const RECENT_KEEP_MS = WINDOW_MS + 30 * 60 * 1000;
 const BACKFILL_MS = DAILY_KEEP_DAYS * DAY_MS;
+const STATE_SCHEMA = 2;
 
 // USD per 1,000,000 tokens. Family-level ESTIMATES — only a last-resort fallback
 // now that we price by exact model id (pricing._models, synced from LiteLLM).
 // Override via ~/.octopus/pricing.json (families and/or a "models" map):
 //   { "opus": {...}, "models": { "claude-opus-4-8": {"input":5,"output":25,...} } }
 const DEFAULT_PRICING = {
-  opus:    { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
-  fable:   { input: 10, output: 50, cacheWrite: 12.5,  cacheRead: 1 },
-  sonnet:  { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
-  haiku:   { input: 1,  output: 5,  cacheWrite: 1.25,  cacheRead: 0.1 },
-  default: { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
+  opus:    { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  fable:   { input: 10, output: 50, cacheWrite5m: 12.5,  cacheWrite1h: 20, cacheRead: 1 },
+  sonnet:  { input: 3,  output: 15, cacheWrite5m: 3.75,  cacheWrite1h: 6, cacheRead: 0.3 },
+  haiku:   { input: 1,  output: 5,  cacheWrite5m: 1.25,  cacheWrite1h: 2, cacheRead: 0.1 },
+  default: { input: 3,  output: 15, cacheWrite5m: 3.75,  cacheWrite1h: 6, cacheRead: 0.3 },
 };
 
 // Normalize a model name to match the pricing table: lowercase, strip any
@@ -61,40 +62,72 @@ function normModelName(model) {
 // Family-level shallow merge — sub-keys (input/output/cacheWrite/cacheRead)
 // from a higher layer replace the same key in a lower layer; missing sub-keys
 // keep the lower-layer value. So a stale cache can't zero-out a missing field.
-function loadPricing() {
+function normalizePriceRow(row, fallback = DEFAULT_PRICING.default) {
+  const input = Number.isFinite(row && row.input) ? row.input : fallback.input;
+  const output = Number.isFinite(row && row.output) ? row.output : fallback.output;
+  const cacheWrite5m = Number.isFinite(row && row.cacheWrite5m)
+    ? row.cacheWrite5m
+    : Number.isFinite(row && row.cacheWrite) ? row.cacheWrite : input * 1.25;
+  const cacheWrite1h = Number.isFinite(row && row.cacheWrite1h) ? row.cacheWrite1h : input * 2;
+  const cacheRead = Number.isFinite(row && row.cacheRead) ? row.cacheRead : input * 0.1;
+  const out = { input, output, cacheWrite5m, cacheWrite1h, cacheRead };
+  if (Number.isFinite(row && row.contextWindow) && row.contextWindow > 0) {
+    out.contextWindow = Math.floor(row.contextWindow);
+  }
+  return out;
+}
+
+function mergePriceRow(base, incoming) {
+  const row = incoming && typeof incoming === 'object' ? { ...incoming } : {};
+  // Backward compatibility with pricing.json files documented by older LLMPET
+  // versions. A legacy cacheWrite override must beat the new built-in 5m field.
+  if (!Number.isFinite(row.cacheWrite5m) && Number.isFinite(row.cacheWrite)) {
+    row.cacheWrite5m = row.cacheWrite;
+  }
+  return normalizePriceRow(row, normalizePriceRow(base || DEFAULT_PRICING.default));
+}
+
+function loadPricing(options = {}) {
+  const cachePath = options.pricingCachePath || PRICING_CACHE_PATH;
+  const overridePath = options.pricingOverridePath || PRICING_OVERRIDE_PATH;
   const out = JSON.parse(JSON.stringify(DEFAULT_PRICING));
   out._models = {}; // exact per-model-id prices (claude-fable-5 → {...}); wins over family
   // layer 1: synced cache (~/.octopus/pricing-cache.json)
   try {
-    const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
+    const c = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
     if (c && c.pricing && typeof c.pricing === 'object') {
       for (const [fam, row] of Object.entries(c.pricing)) {
         if (out[fam] && row && typeof row === 'object') {
-          for (const k of Object.keys(out[fam])) if (Number.isFinite(row[k])) out[fam][k] = row[k];
+          out[fam] = mergePriceRow(out[fam], row);
         }
       }
     }
     if (c && c.models && typeof c.models === 'object') {
       for (const [id, row] of Object.entries(c.models)) {
-        if (row && typeof row === 'object' && Number.isFinite(row.input)) out._models[normModelName(id)] = row;
+        if (row && typeof row === 'object' && Number.isFinite(row.input)) {
+          out._models[normModelName(id)] = normalizePriceRow(row);
+        }
       }
     }
   } catch {}
   // layer 2: user override (~/.octopus/pricing.json) — wins. Supports both family
   // keys and a "models" map of exact ids.
   try {
-    const raw = JSON.parse(fs.readFileSync(PRICING_OVERRIDE_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(overridePath, 'utf8'));
     for (const [fam, row] of Object.entries(raw)) {
       if (fam === 'models' && row && typeof row === 'object') {
         for (const [id, r] of Object.entries(row)) {
           const k = normModelName(id);
-          if (r && typeof r === 'object') out._models[k] = { ...(out._models[k] || {}), ...r };
+          if (r && typeof r === 'object') out._models[k] = mergePriceRow(out._models[k] || DEFAULT_PRICING.default, r);
         }
       } else if (row && typeof row === 'object') {
-        out[fam] = { ...(out[fam] || {}), ...row };
+        out[fam] = mergePriceRow(out[fam] || DEFAULT_PRICING.default, row);
       }
     }
   } catch {}
+  for (const fam of ['opus', 'fable', 'sonnet', 'haiku', 'default']) {
+    out[fam] = normalizePriceRow(out[fam], DEFAULT_PRICING[fam] || DEFAULT_PRICING.default);
+  }
   return out;
 }
 
@@ -103,13 +136,13 @@ function loadPricing() {
 function priceFor(pricing, model) {
   const models = pricing._models || {};
   const norm = normModelName(model);
-  if (norm && models[norm]) return models[norm];
+  if (norm && models[norm]) return normalizePriceRow(models[norm]);
   const m = String(model || '').toLowerCase();
-  if (m.includes('opus')) return pricing.opus;
-  if (m.includes('fable')) return pricing.fable || pricing.default;
-  if (m.includes('haiku')) return pricing.haiku;
-  if (m.includes('sonnet')) return pricing.sonnet;
-  return pricing.default;
+  if (m.includes('opus')) return normalizePriceRow(pricing.opus);
+  if (m.includes('fable')) return normalizePriceRow(pricing.fable || pricing.default);
+  if (m.includes('haiku')) return normalizePriceRow(pricing.haiku);
+  if (m.includes('sonnet')) return normalizePriceRow(pricing.sonnet);
+  return normalizePriceRow(pricing.default);
 }
 
 function dayKey(ts) {
@@ -118,20 +151,91 @@ function dayKey(ts) {
 }
 
 function emptyDay() {
-  return { cost: 0, tokens: 0, msgs: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+  return {
+    cost: 0, tokens: 0, msgs: 0, input: 0, output: 0,
+    cacheCreate: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0,
+  };
 }
 
-function createMetering() {
-  let pricing = loadPricing();
+function emptyUsage() {
+  return { input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 };
+}
+
+function usageSnapshot(usage) {
+  const nested = usage && usage.cache_creation && typeof usage.cache_creation === 'object'
+    ? usage.cache_creation : {};
+  const totalCreate = num(usage && usage.cache_creation_input_tokens);
+  const oneHour = num(nested.ephemeral_1h_input_tokens);
+  const explicitFive = num(nested.ephemeral_5m_input_tokens);
+  // Older transcript rows expose only the aggregate field. Anthropic's default
+  // cache TTL is 5 minutes, so any unclassified remainder belongs there.
+  const fiveMinute = explicitFive + Math.max(0, totalCreate - explicitFive - oneHour);
+  return {
+    input: num(usage && usage.input_tokens),
+    output: num(usage && usage.output_tokens),
+    cacheWrite5m: fiveMinute,
+    cacheWrite1h: oneHour,
+    cacheRead: num(usage && usage.cache_read_input_tokens),
+  };
+}
+
+function mergeUsage(previous, incoming) {
+  const a = previous || emptyUsage();
+  const b = incoming || emptyUsage();
+  const out = {};
+  for (const key of Object.keys(emptyUsage())) out[key] = Math.max(num(a[key]), num(b[key]));
+  return out;
+}
+
+function usageDelta(previous, next) {
+  const a = previous || emptyUsage();
+  const b = next || emptyUsage();
+  const out = {};
+  for (const key of Object.keys(emptyUsage())) out[key] = Math.max(0, num(b[key]) - num(a[key]));
+  return out;
+}
+
+function usageTokens(usage) {
+  const u = usage || emptyUsage();
+  return num(u.input) + num(u.output) + num(u.cacheWrite5m) + num(u.cacheWrite1h) + num(u.cacheRead);
+}
+
+function usageCost(usage, price) {
+  const u = usage || emptyUsage();
+  const p = normalizePriceRow(price);
+  return (
+    num(u.input) * p.input
+    + num(u.output) * p.output
+    + num(u.cacheWrite5m) * p.cacheWrite5m
+    + num(u.cacheWrite1h) * p.cacheWrite1h
+    + num(u.cacheRead) * p.cacheRead
+  ) / 1e6;
+}
+
+function createMetering(options = {}) {
+  const projectsDir = options.projectsDir || PROJECTS_DIR;
+  const stateDir = options.stateDir || STATE_DIR;
+  const statePath = options.statePath || path.join(stateDir, 'usage.json');
+  const pricingPaths = {
+    pricingCachePath: options.pricingCachePath || path.join(stateDir, 'pricing-cache.json'),
+    pricingOverridePath: options.pricingOverridePath || path.join(stateDir, 'pricing.json'),
+  };
+  let pricing = loadPricing(pricingPaths);
 
   // Persisted state.
   let state = {
+    schemaVersion: STATE_SCHEMA,
     cursors: {},          // filePath -> byte offset already consumed
-    seen: {},             // `${msgId}|${requestId}` -> dayKey, dedupe across files/runs
+    records: {},          // message key -> final/max usage snapshot for streaming correction
     daily: {},            // 'YYYY-MM-DD' -> { cost, tokens, msgs, input, output, cacheCreate, cacheRead }
     byModelByDay: {},     // 'YYYY-MM-DD' -> { model: { cost, tokens } }
     hourlyByDay: {},      // 'YYYY-MM-DD' -> [24] cost
+    hourlyTokensByDay: {},// 'YYYY-MM-DD' -> [24] real token usage
     recent: [],           // [{ ts, cost, tokens }] within RECENT_KEEP_MS, for window5h
+    diagnostics: {
+      lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
+      migratedFrom: null, estimatedModels: {},
+    },
   };
   let scanning = false;
   let dirty = false;
@@ -139,14 +243,23 @@ function createMetering() {
 
   function load() {
     try {
-      const raw = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
+      const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       if (raw && typeof raw === 'object') {
+        if (raw.schemaVersion !== STATE_SCHEMA) {
+          state.diagnostics.migratedFrom = Number(raw.schemaVersion) || 1;
+          log('meter', `usage schema ${state.diagnostics.migratedFrom} → ${STATE_SCHEMA}; rebuilding from transcripts`);
+          return;
+        }
         state.cursors = raw.cursors && typeof raw.cursors === 'object' ? raw.cursors : {};
-        state.seen = raw.seen && typeof raw.seen === 'object' ? raw.seen : {};
+        state.records = raw.records && typeof raw.records === 'object' ? raw.records : {};
         state.daily = raw.daily && typeof raw.daily === 'object' ? raw.daily : {};
         state.byModelByDay = raw.byModelByDay && typeof raw.byModelByDay === 'object' ? raw.byModelByDay : {};
         state.hourlyByDay = raw.hourlyByDay && typeof raw.hourlyByDay === 'object' ? raw.hourlyByDay : {};
+        state.hourlyTokensByDay = raw.hourlyTokensByDay && typeof raw.hourlyTokensByDay === 'object' ? raw.hourlyTokensByDay : {};
         state.recent = Array.isArray(raw.recent) ? raw.recent : [];
+        state.diagnostics = raw.diagnostics && typeof raw.diagnostics === 'object'
+          ? { ...state.diagnostics, ...raw.diagnostics } : state.diagnostics;
+        state.schemaVersion = STATE_SCHEMA;
       }
     } catch {}
     pruneDaily();
@@ -162,10 +275,11 @@ function createMetering() {
   function saveNow() {
     dirty = false;
     try {
-      fs.mkdirSync(STATE_DIR, { recursive: true });
-      const tmp = path.join(STATE_DIR, `.usage.${process.pid}.${Date.now()}.tmp`);
-      fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
-      fs.renameSync(tmp, STATE_PATH);
+      fs.mkdirSync(stateDir, { recursive: true });
+      const tmp = path.join(stateDir, `.usage.${process.pid}.${Date.now()}.tmp`);
+      fs.writeFileSync(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+      fs.renameSync(tmp, statePath);
+      try { fs.chmodSync(statePath, 0o600); } catch {}
     } catch (err) {
       log('meter', 'save failed:', err.message);
     }
@@ -176,38 +290,80 @@ function createMetering() {
     for (const k of Object.keys(state.daily)) if (k < cutoff) delete state.daily[k];
     for (const k of Object.keys(state.byModelByDay)) if (k < cutoff) delete state.byModelByDay[k];
     for (const k of Object.keys(state.hourlyByDay)) if (k < cutoff) delete state.hourlyByDay[k];
-    // Bound the dedupe set to the retention window (dayKey values sort lexically).
-    for (const k of Object.keys(state.seen)) if (state.seen[k] < cutoff) delete state.seen[k];
+    for (const k of Object.keys(state.hourlyTokensByDay)) if (k < cutoff) delete state.hourlyTokensByDay[k];
+    // Bound final usage records to the same retention window.
+    for (const [key, rec] of Object.entries(state.records)) {
+      if (!rec || rec.day < cutoff) delete state.records[key];
+    }
   }
 
-  // Add one deduped assistant usage record into the aggregates.
-  function record(tsMs, model, usage) {
-    const input = num(usage.input_tokens);
-    const output = num(usage.output_tokens);
-    const cacheCreate = num(usage.cache_creation_input_tokens);
-    const cacheRead = num(usage.cache_read_input_tokens);
-    const tokens = input + output + cacheCreate + cacheRead;
+  // Apply a positive usage delta. Message count increments only for the first
+  // snapshot; later streaming rows correct token/cost without inventing turns.
+  function recordDelta(tsMs, model, usage, isNew) {
+    const input = num(usage.input);
+    const output = num(usage.output);
+    const cacheWrite5m = num(usage.cacheWrite5m);
+    const cacheWrite1h = num(usage.cacheWrite1h);
+    const cacheCreate = cacheWrite5m + cacheWrite1h;
+    const cacheRead = num(usage.cacheRead);
+    const tokens = usageTokens(usage);
     if (tokens <= 0) return;
 
     const p = priceFor(pricing, model);
-    const cost = (input * p.input + output * p.output + cacheCreate * p.cacheWrite + cacheRead * p.cacheRead) / 1e6;
+    const cost = usageCost(usage, p);
 
     const k = dayKey(tsMs);
     const d = (state.daily[k] = state.daily[k] || emptyDay());
-    d.cost += cost; d.tokens += tokens; d.msgs += 1;
-    d.input += input; d.output += output; d.cacheCreate += cacheCreate; d.cacheRead += cacheRead;
+    d.cost += cost; d.tokens += tokens; d.msgs += isNew ? 1 : 0;
+    d.input += input; d.output += output; d.cacheCreate += cacheCreate;
+    d.cacheWrite5m = num(d.cacheWrite5m) + cacheWrite5m;
+    d.cacheWrite1h = num(d.cacheWrite1h) + cacheWrite1h;
+    d.cacheRead += cacheRead;
 
     const fam = (state.byModelByDay[k] = state.byModelByDay[k] || {});
     const mk = model || 'unknown';
     // Per-model detail (cost + token 四元组 + 轮次) so the panel can show 有总有分.
-    const mv = (fam[mk] = fam[mk] || { cost: 0, tokens: 0, msgs: 0, input: 0, output: 0, cacheCreate: 0, cacheRead: 0 });
-    mv.cost += cost; mv.tokens += tokens; mv.msgs += 1;
-    mv.input += input; mv.output += output; mv.cacheCreate += cacheCreate; mv.cacheRead += cacheRead;
+    const mv = (fam[mk] = fam[mk] || {
+      cost: 0, tokens: 0, msgs: 0, input: 0, output: 0,
+      cacheCreate: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0,
+    });
+    mv.cost += cost; mv.tokens += tokens; mv.msgs += isNew ? 1 : 0;
+    mv.input += input; mv.output += output; mv.cacheCreate += cacheCreate;
+    mv.cacheWrite5m = num(mv.cacheWrite5m) + cacheWrite5m;
+    mv.cacheWrite1h = num(mv.cacheWrite1h) + cacheWrite1h;
+    mv.cacheRead += cacheRead;
 
     const hours = (state.hourlyByDay[k] = state.hourlyByDay[k] || new Array(24).fill(0));
-    hours[new Date(tsMs).getHours()] += cost;
+    const hour = new Date(tsMs).getHours();
+    hours[hour] += cost;
+    const hourlyTokens = (state.hourlyTokensByDay[k] = state.hourlyTokensByDay[k] || new Array(24).fill(0));
+    hourlyTokens[hour] += tokens;
 
     if (Date.now() - tsMs < RECENT_KEEP_MS) state.recent.push({ ts: tsMs, cost, tokens });
+  }
+
+  function ingest(key, tsMs, model, rawUsage) {
+    const incoming = usageSnapshot(rawUsage);
+    if (usageTokens(incoming) <= 0) return false;
+    const previous = state.records[key] || null;
+    const merged = mergeUsage(previous && previous.usage, incoming);
+    const delta = usageDelta(previous && previous.usage, merged);
+    if (usageTokens(delta) <= 0) return false;
+    const isNew = !previous;
+    recordDelta(previous ? previous.ts : tsMs, previous ? previous.model : model, delta, isNew);
+    state.records[key] = {
+      day: dayKey(previous ? previous.ts : tsMs),
+      ts: previous ? previous.ts : tsMs,
+      model: previous ? previous.model : model,
+      usage: merged,
+    };
+    if (!isNew) state.diagnostics.streamingCorrections = num(state.diagnostics.streamingCorrections) + 1;
+    const norm = normModelName(model);
+    if (!norm || !(pricing._models && pricing._models[norm])) {
+      const estimates = state.diagnostics.estimatedModels || (state.diagnostics.estimatedModels = {});
+      estimates[model || 'unknown'] = num(estimates[model || 'unknown']) + (isNew ? 1 : 0);
+    }
+    return true;
   }
 
   function pruneRecent() {
@@ -254,14 +410,9 @@ function createMetering() {
       if (!usage || typeof usage !== 'object') continue;
       const id = msg.id || `${o.requestId || ''}:${o.timestamp || ''}`;
       const key = `${id}|${o.requestId || ''}`;
-      // Dedupe globally, not just within this batch: streaming writes the same id
-      // on several lines, and resume/fork copies prior turns (same id) into a NEW
-      // file — a per-batch Set missed both of those and double-billed the tokens.
-      if (state.seen[key]) continue;
       const tsMs = o.timestamp ? Date.parse(o.timestamp) : st.mtimeMs;
       if (!Number.isFinite(tsMs)) continue;
-      state.seen[key] = dayKey(tsMs);
-      record(tsMs, msg.model || 'unknown', usage);
+      ingest(key, tsMs, msg.model || 'unknown', usage);
     }
     state.cursors[file] = newOffset;
   }
@@ -269,10 +420,10 @@ function createMetering() {
   async function listTranscripts() {
     const out = [];
     let dirs;
-    try { dirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true }); } catch { return out; }
+    try { dirs = await fsp.readdir(projectsDir, { withFileTypes: true }); } catch { return out; }
     for (const d of dirs) {
       if (!d.isDirectory()) continue;
-      const sub = path.join(PROJECTS_DIR, d.name);
+      const sub = path.join(projectsDir, d.name);
       let files;
       try { files = await fsp.readdir(sub); } catch { continue; }
       for (const f of files) if (f.endsWith('.jsonl')) out.push(path.join(sub, f));
@@ -292,6 +443,9 @@ function createMetering() {
       }
       pruneRecent();
       pruneDaily();
+      state.diagnostics.lastScanTs = Date.now();
+      state.diagnostics.scannedFiles = files.length;
+      state.diagnostics.records = Object.keys(state.records).length;
       scheduleSave();
     } catch (err) {
       log('meter', 'scan error:', err.message);
@@ -305,6 +459,7 @@ function createMetering() {
     const today = { ...emptyDay(), ...(state.daily[todayK] || {}) };
     const byModel = state.byModelByDay[todayK] ? { ...state.byModelByDay[todayK] } : {};
     const hourly = (state.hourlyByDay[todayK] || new Array(24).fill(0)).slice();
+    const hourlyTok = (state.hourlyTokensByDay[todayK] || new Array(24).fill(0)).slice();
 
     // Rolling 5h window from recent events.
     const now = Date.now();
@@ -328,11 +483,15 @@ function createMetering() {
       daily[k] = { cost: v.cost, tokens: v.tokens, msgs: v.msgs };
     }
 
-    return { today, window5h, byModel, hourly, daily };
+    return { today, window5h, byModel, hourly, hourlyTok, daily, diagnostics: diagnostics() };
   }
 
   // Re-read the price table (call after a LiteLLM sync lands a fresh cache).
-  function reloadPricing() { pricing = loadPricing(); }
+  function reloadPricing() {
+    pricing = loadPricing(pricingPaths);
+    repriceRecords();
+    scheduleSave();
+  }
 
   // Report the price table the UI is actually using — the old hard-coded
   // { live:false, source:'builtin' } told every online user their sync failed.
@@ -342,7 +501,7 @@ function createMetering() {
     let count = Object.keys(DEFAULT_PRICING).length - 1;
     let source = 'builtin';
     try {
-      const c = JSON.parse(fs.readFileSync(PRICING_CACHE_PATH, 'utf8'));
+      const c = JSON.parse(fs.readFileSync(pricingPaths.pricingCachePath, 'utf8'));
       if (c && c.pricing && typeof c.pricing === 'object' && Object.keys(c.pricing).length) {
         live = true; ts = Number(c.ts) || 0; source = 'litellm';
         // Prefer the exact per-model count (what actually drives billing now).
@@ -351,8 +510,9 @@ function createMetering() {
           : Object.keys(c.pricing).length;
       }
     } catch {}
-    try { fs.accessSync(PRICING_OVERRIDE_PATH); live = true; source = 'override'; } catch {}
-    return { live, count, ts, source };
+    try { fs.accessSync(pricingPaths.pricingOverridePath); live = true; source = 'override'; } catch {}
+    const stale = ts > 0 && Date.now() - ts > 48 * 60 * 60 * 1000;
+    return { live, count, ts, source, stale, estimate: true };
   }
 
   // Whole-history recompute: clear the aggregates + cursors + dedupe set and
@@ -362,15 +522,61 @@ function createMetering() {
   async function rebuild() {
     load(); // pull existing so a partial failure still leaves the old data
     state.cursors = {};
-    state.seen = {};
+    state.records = {};
     state.daily = {};
     state.byModelByDay = {};
     state.hourlyByDay = {};
+    state.hourlyTokensByDay = {};
     state.recent = [];
-    pricing = loadPricing();
+    state.diagnostics = {
+      lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
+      migratedFrom: null, estimatedModels: {},
+    };
+    pricing = loadPricing(pricingPaths);
     await scan();
     saveNow();
     return totals();
+  }
+
+  function resetAggregates() {
+    state.daily = {};
+    state.byModelByDay = {};
+    state.hourlyByDay = {};
+    state.hourlyTokensByDay = {};
+    state.recent = [];
+    state.diagnostics.estimatedModels = {};
+  }
+
+  function repriceRecords() {
+    resetAggregates();
+    const rows = Object.values(state.records).sort((a, b) => a.ts - b.ts);
+    for (const rec of rows) {
+      recordDelta(rec.ts, rec.model, rec.usage, true);
+      const norm = normModelName(rec.model);
+      if (!norm || !(pricing._models && pricing._models[norm])) {
+        const estimates = state.diagnostics.estimatedModels;
+        estimates[rec.model || 'unknown'] = num(estimates[rec.model || 'unknown']) + 1;
+      }
+    }
+    pruneRecent();
+    pruneDaily();
+  }
+
+  function diagnostics() {
+    const info = priceInfo();
+    const estimated = state.diagnostics.estimatedModels || {};
+    return {
+      schemaVersion: STATE_SCHEMA,
+      lastScanTs: num(state.diagnostics.lastScanTs),
+      scannedFiles: num(state.diagnostics.scannedFiles),
+      records: Object.keys(state.records).length,
+      streamingCorrections: num(state.diagnostics.streamingCorrections),
+      migratedFrom: state.diagnostics.migratedFrom || null,
+      estimatedModelCount: Object.keys(estimated).length,
+      estimatedModels: Object.entries(estimated)
+        .sort((a, b) => b[1] - a[1]).slice(0, 8).map(([model, count]) => ({ model, count })),
+      pricing: info,
+    };
   }
 
   // All-time cost/token totals per model, summed across the retained days.
@@ -399,7 +605,10 @@ function createMetering() {
     saveNow(); // always flush the latest aggregates on quit
   }
 
-  return { start, stop, scan, getStats, priceInfo, reloadPricing, rebuild, totals, _state: state };
+  return {
+    start, stop, scan, getStats, priceInfo, reloadPricing, rebuild, totals, diagnostics,
+    _state: state, _ingest: ingest,
+  };
 }
 
 function num(v) {
@@ -407,4 +616,7 @@ function num(v) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-module.exports = { createMetering, DEFAULT_PRICING, normModelName, priceFor, loadPricing };
+module.exports = {
+  createMetering, DEFAULT_PRICING, normModelName, priceFor, loadPricing,
+  normalizePriceRow, mergePriceRow, usageSnapshot, mergeUsage, usageDelta, usageTokens, usageCost,
+};
