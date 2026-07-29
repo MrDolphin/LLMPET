@@ -9,12 +9,14 @@
 
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const {
   SERVER_HEADER,
   SERVER_ID,
+  TOKEN_HEADER,
   BASE_PORT,
   getPortCandidates,
-  readRuntimePort,
+  readRuntimeConfig,
   writeRuntimeConfig,
   clearRuntimeConfig,
 } = require('./transport');
@@ -154,6 +156,29 @@ function createServer(deps) {
 
   let server = null;
   let activePort = null;
+  let activeToken = null;
+
+  function tokenMatches(candidate) {
+    if (!activeToken || typeof candidate !== 'string' || candidate.length !== activeToken.length) return false;
+    try {
+      return crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(activeToken));
+    } catch {
+      return false;
+    }
+  }
+
+  function stateAuthorized(req) {
+    return tokenMatches(req.headers && req.headers[TOKEN_HEADER]);
+  }
+
+  function permissionAuthorized(req) {
+    try {
+      const url = new URL(req.url, `http://127.0.0.1:${activePort || BASE_PORT}`);
+      return url.pathname === '/permission' && tokenMatches(url.searchParams.get('token'));
+    } catch {
+      return false;
+    }
+  }
 
   function handleStatePost(req, res) {
     readBody(req, MAX_STATE_BODY_BYTES, (body) => {
@@ -255,6 +280,7 @@ function createServer(deps) {
       // Off by default — it exposes session cwd/title/assistant text. Opt in with
       // OCTOPUS_DEBUG=1, and even then drop the reply text and the absolute cwd.
       if (process.env.OCTOPUS_DEBUG !== '1') { res.writeHead(404); res.end(); return; }
+      if (!stateAuthorized(req)) { res.writeHead(403, { [SERVER_HEADER]: SERVER_ID }); res.end('forbidden'); return; }
       const snap = core.buildSnapshot();
       const safe = snap.sessions.map((s) => ({
         ...s,
@@ -265,12 +291,19 @@ function createServer(deps) {
       res.end(JSON.stringify({ sessions: safe, pending: permissions.getPending().map((p) => ({ id: p.id, sessionId: p.sessionId, toolName: p.toolName })) }, null, 2));
       return;
     }
-    if (req.method === 'POST' && req.url === '/state') return handleStatePost(req, res);
-    if (req.method === 'POST' && req.url === '/permission') return handlePermissionPost(req, res);
+    if (req.method === 'POST' && req.url === '/state') {
+      if (!stateAuthorized(req)) { res.writeHead(403, { [SERVER_HEADER]: SERVER_ID }); res.end('forbidden'); return; }
+      return handleStatePost(req, res);
+    }
+    if (req.method === 'POST' && permissionAuthorized(req)) return handlePermissionPost(req, res);
+    if (req.method === 'POST' && String(req.url || '').startsWith('/permission')) {
+      res.writeHead(403, { [SERVER_HEADER]: SERVER_ID }); res.end('forbidden'); return;
+    }
     res.writeHead(404); res.end();
   }
 
   function start() {
+    activeToken = crypto.randomBytes(32).toString('hex');
     server = http.createServer(onRequest);
     const ports = getPortCandidates();
     let idx = 0;
@@ -290,7 +323,7 @@ function createServer(deps) {
 
     server.on('listening', () => {
       activePort = ports[idx];
-      writeRuntimeConfig(activePort);
+      writeRuntimeConfig(activePort, activeToken);
       log('server', `listening on 127.0.0.1:${activePort}`);
       startRuntimeGuard();
     });
@@ -306,10 +339,10 @@ function createServer(deps) {
     stopRuntimeGuard();
     runtimeGuard = setInterval(() => {
       if (!activePort) return;
-      const p = readRuntimePort();
-      if (p !== activePort) {
-        log('server', `runtime.json points to ${p} (another instance?) — reasserting ${activePort}`);
-        writeRuntimeConfig(activePort);
+      const runtime = readRuntimeConfig();
+      if (!runtime || runtime.port !== activePort || runtime.token !== activeToken) {
+        log('server', `runtime.json changed (another instance?) — reasserting ${activePort}`);
+        writeRuntimeConfig(activePort, activeToken);
       }
     }, 15000);
     if (runtimeGuard.unref) runtimeGuard.unref();
@@ -319,15 +352,18 @@ function createServer(deps) {
   }
 
   function getPort() { return activePort; }
+  function getToken() { return activeToken; }
 
   function stop() {
     stopRuntimeGuard();
     // 只清掉指向自己的记录，避免误删另一个存活实例刚写的端口
-    if (readRuntimePort() === activePort) clearRuntimeConfig();
+    const runtime = readRuntimeConfig();
+    if (runtime && runtime.port === activePort && runtime.token === activeToken) clearRuntimeConfig();
     if (server) { try { server.close(); } catch {} server = null; }
+    activeToken = null;
   }
 
-  return { start, stop, getPort };
+  return { start, stop, getPort, getToken };
 }
 
 module.exports = { createServer, MAX_STATE_BODY_BYTES };

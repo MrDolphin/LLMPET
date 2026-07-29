@@ -19,7 +19,14 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildPermissionUrl, resolveNodeBin, PORTS, BASE_PORT } = require('./transport');
+const {
+  buildPermissionUrl,
+  resolveNodeBin,
+  readRuntimeConfig,
+  validToken,
+  PORTS,
+  BASE_PORT,
+} = require('./transport');
 
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
 const HOOK_SCRIPT = path.join(__dirname, '..', 'hook', 'octopus-hook.js');
@@ -64,8 +71,17 @@ function commandHook(nodeBin, event) {
 function isOurCommand(hook) {
   return hook && typeof hook.command === 'string' && hook.command.includes(MARKER);
 }
-function isOurHttp(hook, permUrls) {
-  return hook && hook.type === 'http' && typeof hook.url === 'string' && permUrls.has(hook.url);
+function isOurHttp(hook) {
+  if (!hook || hook.type !== 'http' || typeof hook.url !== 'string') return false;
+  try {
+    const url = new URL(hook.url);
+    return url.protocol === 'http:' &&
+      url.hostname === '127.0.0.1' &&
+      PORTS.includes(Number(url.port)) &&
+      url.pathname === '/permission';
+  } catch {
+    return false;
+  }
 }
 
 // Only OUR OWN earlier hook name (this app used to be "llmpet"). We deliberately
@@ -118,26 +134,26 @@ function syncEvent(hooks, event, desired, match) {
   return 'added';
 }
 
-function registerHooks(port) {
+function registerHooks(port, token) {
+  if (!validToken(token)) throw new Error('runtime authentication token unavailable');
   const nodeBin = resolveNodeBin();
   const settings = readSettings();
   if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {};
-  const permUrls = new Set(PORTS.map(buildPermissionUrl));
   const result = { added: 0, updated: 0, skipped: 0, purged: purgeLegacy(settings.hooks) };
 
   for (const event of COMMAND_EVENTS) {
     const r = syncEvent(settings.hooks, event, commandHook(nodeBin, event), isOurCommand);
     result[r]++;
   }
-  const httpDesired = { type: 'http', url: buildPermissionUrl(port || BASE_PORT), timeout: PERMISSION_TIMEOUT_S };
-  const r = syncEvent(settings.hooks, 'PermissionRequest', httpDesired, (h) => isOurHttp(h, permUrls));
+  const httpDesired = { type: 'http', url: buildPermissionUrl(port || BASE_PORT, token), timeout: PERMISSION_TIMEOUT_S };
+  const r = syncEvent(settings.hooks, 'PermissionRequest', httpDesired, isOurHttp);
   result[r]++;
 
   writeAtomic(settings);
   return { ...result, nodeBin };
 }
 
-function removeOurHooks(hooks, permUrls) {
+function removeOurHooks(hooks) {
   let removed = 0;
   for (const event of Object.keys(hooks)) {
     if (!Array.isArray(hooks[event])) continue;
@@ -145,7 +161,7 @@ function removeOurHooks(hooks, permUrls) {
     for (const group of hooks[event]) {
       if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) { groups.push(group); continue; }
       const kept = group.hooks.filter((h) => {
-        if (isOurCommand(h) || isOurHttp(h, permUrls)) { removed++; return false; }
+        if (isOurCommand(h) || isOurHttp(h)) { removed++; return false; }
         return true;
       });
       if (kept.length) groups.push({ ...group, hooks: kept });
@@ -161,8 +177,7 @@ function unregisterHooks(options = {}) {
   let settings;
   try { settings = readSettings(); } catch { return { removed: 0 }; }
   if (!settings.hooks) return { removed: 0 };
-  const permUrls = new Set(PORTS.map(buildPermissionUrl));
-  const removed = removeOurHooks(settings.hooks, permUrls) + purgeLegacy(settings.hooks);
+  const removed = removeOurHooks(settings.hooks) + purgeLegacy(settings.hooks);
   if (!removed) return { removed: 0 };
   let backupPath = null;
   if (options.backup) {
@@ -175,17 +190,45 @@ function unregisterHooks(options = {}) {
   return { removed, backupPath };
 }
 
+function hooksCurrent(port, token) {
+  if (!validToken(token)) return false;
+  try {
+    const settings = readSettings();
+    const hooks = settings.hooks || {};
+    const commandsOk = COMMAND_EVENTS.every((event) =>
+      Array.isArray(hooks[event]) &&
+      hooks[event].some((group) => Array.isArray(group && group.hooks) && group.hooks.some(isOurCommand)));
+    const desiredUrl = buildPermissionUrl(port || BASE_PORT, token);
+    const permissionOk = Array.isArray(hooks.PermissionRequest) &&
+      hooks.PermissionRequest.some((group) => Array.isArray(group && group.hooks) &&
+        group.hooks.some((hook) => isOurHttp(hook) && hook.url === desiredUrl));
+    return commandsOk && permissionOk;
+  } catch {
+    return false;
+  }
+}
+
 function markerPresent() {
   try { return fs.readFileSync(SETTINGS_PATH, 'utf8').includes(MARKER); } catch { return false; }
 }
 
-module.exports = { registerHooks, unregisterHooks, markerPresent, SETTINGS_PATH, HOOK_SCRIPT, MARKER, COMMAND_EVENTS };
+module.exports = {
+  registerHooks,
+  unregisterHooks,
+  markerPresent,
+  hooksCurrent,
+  SETTINGS_PATH,
+  HOOK_SCRIPT,
+  MARKER,
+  COMMAND_EVENTS,
+};
 
 // CLI: `node backend/hookinstall.js` installs; `--uninstall` removes.
 if (require.main === module) {
   if (process.argv.includes('--uninstall')) {
     console.log(unregisterHooks({ backup: true }));
   } else {
-    console.log(registerHooks(require('./transport').readRuntimePort()));
+    const runtime = readRuntimeConfig();
+    console.log(registerHooks(runtime && runtime.port, runtime && runtime.token));
   }
 }

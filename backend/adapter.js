@@ -344,6 +344,8 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     input: today.input || 0,
     output: today.output || 0,
     cacheCreate: today.cacheCreate || 0,
+    cacheWrite5m: today.cacheWrite5m || 0,
+    cacheWrite1h: today.cacheWrite1h || 0,
     cacheRead: today.cacheRead || 0,
     tokens: today.tokens || 0,
     cost: today.cost || 0,
@@ -374,14 +376,17 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
     todos: [],
     todosProject: '',
     hourly: m.hourly || new Array(24).fill(0),
-    hourlyTok: new Array(24).fill(0),
+    hourlyTok: m.hourlyTok || new Array(24).fill(0),
     daily: m.daily || {},
+    diagnostics: m.diagnostics || null,
     lastActivityTs: snapshot.lastActivityTs || 0,
     idleMs: snapshot.idleMs,
     bg: { running: 0, zombie: 0, total: 0, items: [] },
     context, // supplement: { percent, used, limit } | null
     // Codex 套餐配额（5h/周窗口 used%）——Codex 没有逐 token 价目，配额比 $ 更真实
     codexLimits: (opts && opts.codexLimits) || null,
+    codexUsage: (opts && opts.codexUsage) || null,
+    usageProvider: (opts && opts.usageProvider) || 'claude',
     ts: snapshot.ts,
   };
 }

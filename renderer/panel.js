@@ -9,6 +9,7 @@ const LOCALE_TAG = { zh: 'zh-CN', en: 'en-US', ja: 'ja-JP' };
 
 let hoursSummary = ''; // 24h 视图默认读数（鼠标移开时恢复）
 let calSummary = '';   // 日历默认读数
+let usageMetric = 'tokens';
 const dKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 function fmt(n) {
@@ -78,9 +79,13 @@ function render(s) {
   // token 明细
   $('t-in').textContent = fmt(s.today.input);
   $('t-out').textContent = fmt(s.today.output);
-  $('t-cw').textContent = fmt(s.today.cacheCreate);
+  $('t-cw5').textContent = fmt(s.today.cacheWrite5m);
+  $('t-cw1').textContent = fmt(s.today.cacheWrite1h);
   $('t-cr').textContent = fmt(s.today.cacheRead);
   $('t-msg').textContent = s.today.messages;
+
+  renderCodexUsage(s.codexUsage);
+  renderDiagnostics(s.diagnostics);
 
   // 按模型（有总有分：每模型 cost + 占比条 + in/out/cache 四元组明细，末行合计）
   renderByModel(s.byModel || {});
@@ -89,7 +94,7 @@ function render(s) {
   renderTodos(s.todos || [], s.todosProject || '');
 
   // 用量趋势：24h + 日历
-  renderChart(s.hourly || []);
+  renderChart(s.hourly || [], s.hourlyTok || []);
   renderCal(s.daily || {});
 
   // 进行中的任务（各会话状态）
@@ -148,7 +153,10 @@ function renderByModel(byModel) {
     const pct = Math.round(((v.cost || 0) / base) * 100);
     const hasDetail = (v.input || v.output || v.cacheCreate || v.cacheRead);
     const detail = hasDetail
-      ? `<div class="m-detail">${escapeHtml(t('panel.modelDetail', { in: fmt(v.input), out: fmt(v.output), cw: fmt(v.cacheCreate), cr: fmt(v.cacheRead) }))}${v.msgs ? escapeHtml(t('panel.modelRounds', { n: v.msgs })) : ''}</div>`
+      ? `<div class="m-detail">${escapeHtml(t('panel.modelDetail', {
+        in: fmt(v.input), out: fmt(v.output),
+        cw5: fmt(v.cacheWrite5m), cw1: fmt(v.cacheWrite1h), cr: fmt(v.cacheRead),
+      }))}${v.msgs ? escapeHtml(t('panel.modelRounds', { n: v.msgs })) : ''}</div>`
       : '';
     html += `<div class="m-item">`
       + `<div class="m-head"><span class="mc">${escapeHtml(shortModel(model))}</span>`
@@ -179,23 +187,65 @@ const STATE_META = {
   greet: { key: 'state.greet', cls: 'st-greet' },
   talking: { key: 'state.talking', cls: 'st-talking' },
 };
-function renderChart(hourly) {
+function renderCodexUsage(usage) {
+  const wrap = $('codex-usage');
+  if (!wrap) return;
+  const today = usage && usage.today;
+  const lifetime = usage && usage.lifetime;
+  if (!today || !lifetime || (!today.tokens && !lifetime.tokens)) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  $('codex-today').textContent = fmt(today.tokens);
+  $('codex-lifetime').textContent = fmt(lifetime.tokens);
+  $('codex-today-detail').textContent = t('panel.codexBreakdown', {
+    in: fmt(today.input), out: fmt(today.output),
+    cached: fmt(today.cachedInput), reasoning: fmt(today.reasoningOutput),
+  });
+  $('codex-lifetime-detail').textContent = t('panel.codexLocalHistory', {
+    sessions: usage.diagnostics && usage.diagnostics.sessions || 0,
+    events: usage.diagnostics && usage.diagnostics.events || 0,
+  });
+}
+
+function renderDiagnostics(diag) {
+  const el = $('usage-diagnostics');
+  if (!el) return;
+  if (!diag) { el.textContent = ''; return; }
+  const last = diag.lastScanTs
+    ? new Date(diag.lastScanTs).toLocaleTimeString(LOCALE_TAG[window.OctoI18n.getLang()], { hour: '2-digit', minute: '2-digit' })
+    : t('panel.diagNever');
+  const bits = [
+    t('panel.diagScan', { when: last, files: diag.scannedFiles || 0, records: diag.records || 0 }),
+    t('panel.diagCorrections', { n: diag.streamingCorrections || 0 }),
+  ];
+  if (diag.estimatedModelCount) bits.push(t('panel.diagEstimated', { n: diag.estimatedModelCount }));
+  if (diag.pricing && diag.pricing.stale) bits.push(t('panel.diagStale'));
+  el.textContent = bits.join(' · ');
+}
+
+function renderChart(hourlyCost, hourlyTokens) {
   const el = $('chart');
   if (!el) return;
-  if (!hourly.length) hourly = new Array(24).fill(0);
-  const max = Math.max(0.000001, ...hourly);
+  const hourly = usageMetric === 'cost' ? hourlyCost : hourlyTokens;
+  const values = hourly && hourly.length ? hourly : new Array(24).fill(0);
+  const max = Math.max(0.000001, ...values);
   const nowH = new Date().getHours();
   let total = 0, peakH = 0, peakV = 0;
-  el.innerHTML = hourly
-    .map((c, h) => {
-      total += c;
-      if (c > peakV) { peakV = c; peakH = h; }
-      const pct = Math.max(3, Math.round((c / max) * 100));
-      const cls = c <= 0 ? 'bar empty' : h === nowH ? 'bar now' : 'bar';
-      return `<div class="${cls}" data-h="${h}" data-c="${c.toFixed(3)}" style="height:${c <= 0 ? 4 : pct}%" title="${h}:00 · $${c.toFixed(3)}"></div>`;
+  el.innerHTML = values
+    .map((value, h) => {
+      total += value;
+      if (value > peakV) { peakV = value; peakH = h; }
+      const pct = Math.max(3, Math.round((value / max) * 100));
+      const cls = value <= 0 ? 'bar empty' : h === nowH ? 'bar now' : 'bar';
+      const display = usageMetric === 'cost' ? '$' + value.toFixed(3) : fmt(value) + ' tok';
+      return `<div class="${cls}" data-h="${h}" data-v="${escapeHtml(display)}" style="height:${value <= 0 ? 4 : pct}%" title="${h}:00 · ${escapeHtml(display)}"></div>`;
     })
     .join('');
-  hoursSummary = t('panel.hoursSummary', { total: total.toFixed(2), peakH, peakV: peakV.toFixed(2) });
+  hoursSummary = usageMetric === 'cost'
+    ? t('panel.hoursSummaryCost', { total: total.toFixed(2), peakH, peakV: peakV.toFixed(2) })
+    : t('panel.hoursSummaryTokens', { total: fmt(total), peakH, peakV: fmt(peakV) });
   const ro = $('hours-readout');
   if (ro) ro.innerHTML = hoursSummary;
 }
@@ -215,8 +265,9 @@ function renderCal(daily) {
   for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
     const k = dKey(d);
     const v = daily[k] || { cost: 0, tokens: 0, msgs: 0 };
-    if (v.cost > max) max = v.cost;
-    total += v.cost;
+    const metricValue = usageMetric === 'cost' ? v.cost : (v.tokens || 0);
+    if (metricValue > max) max = metricValue;
+    total += metricValue;
     list.push({ k, cost: v.cost, tokens: v.tokens || 0, msgs: v.msgs || 0 });
   }
   let html = '';
@@ -224,14 +275,17 @@ function renderCal(daily) {
     html += '<div class="cal-col">';
     for (let j = 0; j < 7 && i + j < list.length; j++) {
       const c = list[i + j];
-      const lvl = c.cost <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((c.cost / max) * 4)));
+      const metricValue = usageMetric === 'cost' ? c.cost : c.tokens;
+      const lvl = metricValue <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((metricValue / max) * 4)));
       const isToday = c.k === todayK ? ' today' : '';
       html += `<div class="cal-cell lv${lvl}${isToday}" data-k="${c.k}" data-c="${c.cost.toFixed(2)}" data-t="${fmt(c.tokens)}" data-m="${c.msgs}" title="${c.k} · $${c.cost.toFixed(2)}"></div>`;
     }
     html += '</div>';
   }
   el.innerHTML = html;
-  calSummary = t('panel.calSummary', { n: list.length, total: total.toFixed(2) });
+  calSummary = usageMetric === 'cost'
+    ? t('panel.calSummaryCost', { n: list.length, total: total.toFixed(2) })
+    : t('panel.calSummaryTokens', { n: list.length, total: fmt(total) });
   const cr = $('cal-readout');
   if (cr) cr.innerHTML = calSummary;
 }
@@ -410,10 +464,21 @@ document.querySelectorAll('.view-tabs .vt').forEach((b) =>
   })
 );
 
+document.querySelectorAll('.metric-tabs .mt').forEach((b) =>
+  b.addEventListener('click', () => {
+    usageMetric = b.dataset.metric === 'cost' ? 'cost' : 'tokens';
+    document.querySelectorAll('.metric-tabs .mt').forEach((x) => x.classList.toggle('active', x === b));
+    if (lastStats) {
+      renderChart(lastStats.hourly || [], lastStats.hourlyTok || []);
+      renderCal(lastStats.daily || {});
+    }
+  })
+);
+
 // 悬停看具体数值：24h 柱
 $('chart').addEventListener('mouseover', (e) => {
   const bar = e.target.closest('.bar');
-  if (bar) $('hours-readout').innerHTML = `${bar.dataset.h}:00 · <b>$${bar.dataset.c}</b>`;
+  if (bar) $('hours-readout').innerHTML = `${bar.dataset.h}:00 · <b>${escapeHtml(bar.dataset.v)}</b>`;
 });
 $('chart').addEventListener('mouseleave', () => { $('hours-readout').innerHTML = hoursSummary; });
 

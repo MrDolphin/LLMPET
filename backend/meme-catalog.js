@@ -10,7 +10,10 @@ const MEME_ROOT = path.dirname(CATALOG_PATH);
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 const MEDIA_RE = /^[a-z0-9][a-z0-9._/-]{1,180}$/i;
 const MAX_PROMPT_CHARS = 12000;
+const MAX_GIF_BYTES = 30 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const REACTION_STATES = new Set(RENDER_STATE_WORDS);
+const LICENSE_STATUSES = new Set(['cleared', 'public-domain', 'unverified']);
 // A submitted prompt can briefly disappear from the session watcher while the
 // desktop client resumes it. `idle` / `sleeping` bridge that observation gap
 // visually without changing the semantic state. Human-action states such as
@@ -26,6 +29,38 @@ function safeMediaPath(value, memeRoot = MEME_ROOT) {
   if (typeof value !== 'string' || !MEDIA_RE.test(value) || value.includes('..')) return null;
   const full = path.resolve(memeRoot, value);
   return full.startsWith(memeRoot + path.sep) ? full : null;
+}
+
+function validateMediaFile(id, file, kind) {
+  const st = fs.statSync(file);
+  const cap = kind === 'gif' ? MAX_GIF_BYTES : MAX_AUDIO_BYTES;
+  if (!st.isFile() || st.size <= 0 || st.size > cap) {
+    throw new Error(`${id}: ${kind} 文件为空或超过 ${Math.round(cap / 1024 / 1024)}MB`);
+  }
+  const fd = fs.openSync(file, 'r');
+  const head = Buffer.alloc(10);
+  try { fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+  if (kind === 'gif' && !/^GIF8[79]a$/.test(head.subarray(0, 6).toString('ascii'))) {
+    throw new Error(`${id}: visual.gif 不是有效 GIF`);
+  }
+  const looksMp3 = head.subarray(0, 3).toString('ascii') === 'ID3' || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
+  if (kind === 'audio' && !looksMp3) throw new Error(`${id}: voice.mp3 不是有效 MP3`);
+}
+
+function validateProvenance(id, raw) {
+  if (!raw || typeof raw !== 'object') throw new Error(`${id}: 缺少 provenance 素材来源信息`);
+  const license = String(raw.license || '');
+  if (!LICENSE_STATUSES.has(license)) throw new Error(`${id}: provenance.license 不合法`);
+  const sourceUrl = raw.sourceUrl == null ? null : String(raw.sourceUrl).slice(0, 500);
+  if (sourceUrl && !/^https?:\/\//i.test(sourceUrl)) throw new Error(`${id}: provenance.sourceUrl 必须是 http(s) URL`);
+  return Object.freeze({
+    origin: String(raw.origin || 'unknown').slice(0, 80),
+    creator: String(raw.creator || 'unknown').slice(0, 120),
+    sourceUrl,
+    license,
+    commercialUse: raw.commercialUse === true,
+    notes: String(raw.notes || '').slice(0, 500),
+  });
 }
 
 // Per-locale overrides. Every field is optional and falls back to the Chinese
@@ -81,6 +116,8 @@ function validateItem(raw, memeRoot = MEME_ROOT) {
   const prompt = raw.prompt && raw.prompt.text;
   if (!gif || !audio) throw new Error(`${raw.id}: 媒体路径不合法`);
   if (!fs.existsSync(gif) || !fs.existsSync(audio)) throw new Error(`${raw.id}: 媒体文件不存在`);
+  validateMediaFile(raw.id, gif, 'gif');
+  validateMediaFile(raw.id, audio, 'audio');
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_CHARS) {
     throw new Error(`${raw.id}: prompt 为空或过长`);
   }
@@ -95,6 +132,7 @@ function validateItem(raw, memeRoot = MEME_ROOT) {
     i18n: validateI18n(raw.id, raw.i18n),
     category: String(raw.category || 'general').slice(0, 64),
     tags: Object.freeze((Array.isArray(raw.tags) ? raw.tags : []).slice(0, 12).map((v) => String(v).slice(0, 32))),
+    provenance: validateProvenance(raw.id, raw.provenance),
     media: Object.freeze({
       gif: raw.media.gif,
       audio: raw.media.audio,
@@ -116,8 +154,8 @@ function validateItem(raw, memeRoot = MEME_ROOT) {
 
 function loadCatalog(catalogPath = CATALOG_PATH) {
   const raw = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
-  if (!raw || raw.schemaVersion !== 1 || !Array.isArray(raw.items)) {
-    throw new Error('表情包目录 schemaVersion 必须为 1');
+  if (!raw || raw.schemaVersion !== 2 || !Array.isArray(raw.items)) {
+    throw new Error('表情包目录 schemaVersion 必须为 2');
   }
   const seen = new Set();
   const memeRoot = path.dirname(catalogPath);
@@ -126,7 +164,7 @@ function loadCatalog(catalogPath = CATALOG_PATH) {
     if (seen.has(item.id)) throw new Error(`表情包 id 重复: ${item.id}`);
     seen.add(item.id);
   }
-  return Object.freeze({ schemaVersion: 1, items: Object.freeze(items) });
+  return Object.freeze({ schemaVersion: 2, items: Object.freeze(items) });
 }
 
 function digest(value) {
@@ -168,10 +206,20 @@ function resourceStamp(memeRoot) {
   return rows.join('|');
 }
 
+const mediaDigestCache = new Map();
+function fileDigest(file) {
+  const stamp = statStamp(file);
+  const hit = mediaDigestCache.get(file);
+  if (hit && hit.stamp === stamp) return hit.digest;
+  const value = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 16);
+  mediaDigestCache.set(file, { stamp, digest: value });
+  return value;
+}
+
 function mediaVersion(item, memeRoot) {
   const gif = safeMediaPath(item.media.gif, memeRoot);
   const audio = safeMediaPath(item.media.audio, memeRoot);
-  return digest(`${item.media.gif}:${statStamp(gif)}|${item.media.audio}:${statStamp(audio)}`);
+  return digest(`${item.media.gif}:${fileDigest(gif)}|${item.media.audio}:${fileDigest(audio)}`);
 }
 
 function createCatalogStore(options = {}) {

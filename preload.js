@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('pet', {
   setSkin: (s) => ipcRenderer.send('set-skin', s),
   setBudget: (v) => ipcRenderer.send('set-budget', v),
   toggleMute: () => ipcRenderer.send('toggle-mute'),
+  setSessionPrefs: (pinned, archived) => ipcRenderer.send('set-session-prefs', pinned, archived),
   territoryRunNow: () => ipcRenderer.send('territory-run-now'),
   territoryToggleAuto: () => ipcRenderer.send('territory-toggle-auto'),
   quit: () => ipcRenderer.send('quit-app'),

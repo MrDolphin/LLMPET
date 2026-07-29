@@ -222,6 +222,9 @@ const slMemeView = document.getElementById('sl-meme-view');
 const slMemeSession = document.getElementById('sl-meme-session');
 const slMemeGrid = document.getElementById('sl-meme-grid');
 const slMemeStatus = document.getElementById('sl-meme-status');
+const slSearch = document.getElementById('sl-search');
+const slFilters = document.getElementById('sl-filters');
+const slArchivedToggle = document.getElementById('sl-archived-toggle');
 const memePlayer = document.getElementById('meme-player');
 const memeImage = document.getElementById('meme-image');
 const memeCaption = document.getElementById('meme-caption');
@@ -233,6 +236,11 @@ let lastAskSig = ''; // 当前面板内容签名，避免每 2s 重渲冲掉用�
 const answered = new Set(); // 已答的 key，避免快照延迟导致重弹
 let askHover = false; // 鼠标在选项面板上
 let elic = null;      // elicitation 渲染态：{ key, questions, qIdx, answers, selected }
+let sessionSearch = '';
+let sessionFilter = 'all';
+let showArchived = false;
+let pinnedSessionIds = [];
+let archivedSessionIds = [];
 // 面板开着、且(鼠标在面板上 / 输入框聚焦/有草稿 / 已选了选项) = 交互中：
 // 此时别重渲面板、别改小章鱼状态，免得打断你思考/选择。面板一关就自动解除。
 const isInteracting = () => askActive && (askHover || document.activeElement === askText || !!(askText && askText.value) || (elic && elic.selected != null));
@@ -753,7 +761,7 @@ function closeTodoPop() {
 
 // ---------- 会话列表 HUD（左键弹出）----------
 let sessListOpen = false;
-let memeCatalog = { schemaVersion: 1, items: [] };
+let memeCatalog = { schemaVersion: 2, items: [] };
 let memeTarget = null;
 let memeTimer = null;
 let memeAudio = null;
@@ -789,8 +797,11 @@ const SESS_SORT = { waiting: 0, needsinput: 0, error: 1, working: 2, juggling: 2
 // 对齐参考项目阈值：≥90% 红(hot)、≥75% 黄(warm)、其余灰
 function ctxClass(p) { return p >= 90 ? 'high' : p >= 75 ? 'mid' : ''; }
 
-// 单一判定：哪些会话出现在「头顶小点」和「会话列表 HUD」里（保持两处联动一致）
-const isVisibleSession = (s) => !!s && !s.headless && s.state !== 'sleeping';
+const sessionKey = (s) => String((s && (s.sessionId || s.id)) || '');
+const isBaseVisibleSession = (s) => !!s && !s.headless && s.state !== 'sleeping';
+const isArchivedSession = (s) => archivedSessionIds.includes(sessionKey(s));
+// 头顶状态点永远不展示已归档项；HUD 可通过「归档」开关单独查看。
+const isVisibleSession = (s) => isBaseVisibleSession(s) && !isArchivedSession(s);
 // 单一配色：小点和 HUD 用同一套（完成→绿、中断→红，否则按状态）
 function sessionDotClass(s) {
   if (s.state === 'idle' && s.badge === 'done') return 'done';
@@ -800,8 +811,23 @@ function sessionDotClass(s) {
 
 function visibleSessions() {
   return (curSessions || [])
-    .filter(isVisibleSession)
+    .filter((s) => !!s && !s.headless && (s.state !== 'sleeping' || (showArchived && isArchivedSession(s))))
+    .filter((s) => showArchived ? isArchivedSession(s) : !isArchivedSession(s))
+    .filter((s) => {
+      if (sessionFilter === 'attention') return ['waiting', 'needsinput', 'error'].includes(s.state);
+      if (sessionFilter === 'claude' || sessionFilter === 'codex') return s.agent === sessionFilter;
+      return true;
+    })
+    .filter((s) => {
+      const q = sessionSearch.trim().toLocaleLowerCase();
+      if (!q) return true;
+      return [s.project, s.sessionId, s.cwd, s.op]
+        .some((v) => String(v || '').toLocaleLowerCase().includes(q));
+    })
     .sort((a, b) => {
+      const pinA = pinnedSessionIds.includes(sessionKey(a)) ? 0 : 1;
+      const pinB = pinnedSessionIds.includes(sessionKey(b)) ? 0 : 1;
+      if (pinA !== pinB) return pinA - pinB;
       const pa = SESS_SORT[a.state] != null ? SESS_SORT[a.state] : 3;
       const pb = SESS_SORT[b.state] != null ? SESS_SORT[b.state] : 3;
       if (pa !== pb) return pa - pb;
@@ -836,17 +862,44 @@ function renderSessList() {
     const dotCls = sessionDotClass(s); // 与头顶小点同一套配色
     const ctx = typeof s.contextPercent === 'number'
       ? `<span class="sl-ctx ${ctxClass(s.contextPercent)}">${s.contextPercent}%</span>` : '';
+    const key = sessionKey(s);
+    const pinned = pinnedSessionIds.includes(key);
+    const archived = archivedSessionIds.includes(key);
     row.innerHTML =
       `<span class="sl-dot ${dotCls}"></span>` +
       `<span class="sl-icon" title="${s.agent === 'codex' ? 'Codex' : 'Claude'}">${agentIcon(s)}</span>` +
       `<div class="sl-main"><div class="sl-name">${esc(s.project)}</div>` +
       `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
       ctx +
-      `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>`;
+      `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>` +
+      `<span class="sl-actions">` +
+      `<button class="sl-action pin ${pinned ? 'active' : ''}" title="${esc(t(pinned ? 'sess.unpin' : 'sess.pin'))}">★</button>` +
+      `<button class="sl-action archive ${archived ? 'active' : ''}" title="${esc(t(archived ? 'sess.unarchive' : 'sess.archive'))}">▣</button>` +
+      `</span>`;
     const memeBtn = row.querySelector('.sl-meme-entry');
     memeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openMemePage(s);
+    });
+    row.querySelector('.sl-action.pin').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (pinned) pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
+      else {
+        pinnedSessionIds = [key, ...pinnedSessionIds.filter((id) => id !== key)];
+        archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
+      }
+      window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
+      renderSessList();
+    });
+    row.querySelector('.sl-action.archive').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (archived) archivedSessionIds = archivedSessionIds.filter((id) => id !== key);
+      else {
+        archivedSessionIds = [key, ...archivedSessionIds.filter((id) => id !== key)];
+        pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
+      }
+      window.pet.setSessionPrefs(pinnedSessionIds, archivedSessionIds);
+      renderSessList();
     });
     row.addEventListener('click', () => {
       window.pet.focusSession(s.sessionId || '');
@@ -1482,13 +1535,22 @@ function perfNow() {
 // ---------- 统计 + 聚合状态 ----------
 let lastStats = null; // 最近一次快照：transient 到期时用它立即重算聚合态
 let sayToken = 0;     // say 接棒 happy 的排队令牌（新事件作废旧排队）
+function compactTokens(value) {
+  const n = Number(value) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(Math.round(n));
+}
 function applyStats(s) {
   if (!s) return;
   lastStats = s;
   if (AGENT === 'codex') {
     // Codex 没有逐 token 价目，额度条显示套餐窗口用量（5h 主窗口 + 周窗口）
     const rl = s.codexLimits;
-    chipCost.textContent = 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
+    const today = s.codexUsage && s.codexUsage.today;
+    chipCost.textContent = today && today.tokens
+      ? compactTokens(today.tokens) + ' tok'
+      : 'Codex' + (rl && rl.planType ? ' ' + rl.planType : '');
     chipWindow.textContent = rl && rl.usedPercent != null
       ? t('chip.quota', { pct: Math.round(rl.usedPercent) })
         + (rl.secondaryUsedPercent != null ? t('chip.weekly', { pct: Math.round(rl.secondaryUsedPercent) }) : '')
@@ -1549,6 +1611,9 @@ function renderSessions(sessions) {
   sessionsEl.innerHTML = '';
   // 与会话列表 HUD 完全联动：同一过滤(非 headless/非睡眠)、同一配色、同一排序。
   const list = (sessions || []).filter(isVisibleSession).sort((a, b) => {
+    const pinA = pinnedSessionIds.includes(sessionKey(a)) ? 0 : 1;
+    const pinB = pinnedSessionIds.includes(sessionKey(b)) ? 0 : 1;
+    if (pinA !== pinB) return pinA - pinB;
     const pa = SESS_SORT[a.state] != null ? SESS_SORT[a.state] : 3;
     const pb = SESS_SORT[b.state] != null ? SESS_SORT[b.state] : 3;
     return pa !== pb ? pa - pb : (a.idleMs || 0) - (b.idleMs || 0);
@@ -1570,6 +1635,9 @@ window.pet.onConfig((cfg) => {
   territorySupported = !!cfg.territorySupported;
   if (cfg.lang) applyLang(cfg.lang);
   if (cfg.skin) applySkin(cfg.skin);
+  pinnedSessionIds = Array.isArray(cfg.pinnedSessions) ? cfg.pinnedSessions.slice() : [];
+  archivedSessionIds = Array.isArray(cfg.archivedSessions) ? cfg.archivedSessions.slice() : [];
+  if (sessListOpen && !memeTarget) renderSessList();
 });
 
 // Static markup carries its Chinese text inline (so the window is never blank
@@ -1579,6 +1647,7 @@ function applyStaticI18n() {
   document.documentElement.lang = window.OctoI18n.getLang();
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) el.setAttribute('aria-label', t(el.dataset.i18nAria));
   for (const el of document.querySelectorAll('[data-i18n-ph]')) {
     el.placeholder = t(el.dataset.i18nPh);
     delete el.dataset.ph; // drop the cached original so the warn/restore pair re-seeds
@@ -1689,6 +1758,27 @@ document.getElementById('tp-close').addEventListener('click', (e) => { e.stopPro
 // 会话列表 HUD：关闭 + 底部操作（新开按钮按本窗口的 agent 分流）
 document.getElementById('sl-close').addEventListener('click', (e) => { e.stopPropagation(); closeSessList(); });
 slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
+slSearch.addEventListener('input', () => {
+  sessionSearch = slSearch.value || '';
+  renderSessList();
+  fitPopup(sesslist);
+});
+slSearch.addEventListener('focus', () => window.pet.focusPet());
+slSearch.addEventListener('blur', () => window.pet.blurPet());
+slFilters.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  e.stopPropagation();
+  if (btn === slArchivedToggle) {
+    showArchived = !showArchived;
+    btn.classList.toggle('active', showArchived);
+  } else if (btn.dataset.filter) {
+    sessionFilter = btn.dataset.filter;
+    slFilters.querySelectorAll('[data-filter]').forEach((el) => el.classList.toggle('active', el === btn));
+  }
+  renderSessList();
+  fitPopup(sesslist);
+});
 const slNewBtn = document.getElementById('sl-new');
 const slNewCodexBtn = document.getElementById('sl-new-codex');
 // Rebind the key rather than the text: applyStaticI18n() re-reads data-i18n on

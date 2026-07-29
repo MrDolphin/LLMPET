@@ -71,7 +71,7 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
 
 - **不装任何钩子**：Codex 只有一个全局 `notify` 配置位（常被 ChatGPT 桌面 App 占用），所以走「监听 rollout 文件」——增量 tail、零配置、卸载无残留。
 - 事件映射：`user_message→思考`；首个 `exec_command/apply_patch` 后整轮保持“干活中”（工具结果和中间 reasoning 不会误降成思考），直到 `task_complete→完成庆祝+💬` 或 `turn_aborted→中断徽标`；`token_count→上下文%`。guardian / auto-review 等 subagent 内部线程自动过滤，长会话恢复时只读取新增事件、不重放历史。
-- **额度**：Codex 没有逐 token 价目，面板显示套餐窗口用量（5h 主窗口 + 周窗口 %，来自 rollout 的 `rate_limits`）。
+- **用量与额度分开**：按 rollout 每条 `last_token_usage` 建立去重台账，显示今日 / 本机留存历史 token；套餐 5h 主窗口与周窗口仍单独读取 `rate_limits`。本地 token 台账不冒充 OpenAI 账单或账号全生命周期统计。
 - **两种形态**（托盘 → 设置 → 分身）：
   - **单宠**（默认）：一只宠同时盯两个后端，会话列表用图标区分（Claude 橙 burst / Codex 蓝终端块）；
   - **双宠**：Claude / Codex 各一只，形象、位置独立可拖，各自戴名牌，事件各归各的宠。
@@ -106,7 +106,7 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 - 打包安装版：`npm run package:win`（electron-builder，产出 NSIS 安装包 + zip；国内网络可另设 `$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'`）。
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
-- **左键点桌宠** = 弹出**会话列表**（每行：状态点 + 会话名 + 上下文用量%），点某行把该会话的终端调到前台；没有会话时给「新开 Claude」按钮。
+- **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
 - **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
 - 托盘菜单可开详情面板、静音、唤起 Claude、打开日志、**卸载钩子**、退出。
 - 详情面板里可切皮肤 / 模式 / 设 5h 预算。
@@ -129,14 +129,17 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 > 表情包的 GIF 素材本身带中文字幕（如月薪喵皮肤的「熬夜冠军」），换语言不会改图 —— 那要重做素材。
 
 ### 计量 / 计费
-- 数据源：本机 `~/.claude/projects/**/*.jsonl`（只读 token 数 / 模型 / 时间戳，**不读内容**）。
-- 状态持久化：`~/.octopus/usage.json`（含 90 天日历、游标）。首次启动会回填近 95 天历史。
-- **按完整 model id 精确计价**：从 [LiteLLM 公开价目表](https://github.com/BerriAI/litellm) 同步每个模型的真实单价（opus 各代、fable、sonnet 各代各自独立），未同步时回退家族估算。可用 `~/.octopus/pricing.json` 覆盖（家族键或精确 `models` 映射）：
+- Claude 数据源：本机 `~/.claude/projects/**/*.jsonl`；Codex 数据源：本机 `~/.codex/sessions/**/*.jsonl`。计量只提取 token、模型、时间与单次 usage，均为增量只读扫描。
+- 状态分别持久化到 `~/.octopus/usage.json` 与 `~/.octopus/codex-usage.json`。Claude 首次回填近 95 天；Codex 显示本机仍保留的 rollout 历史，不等同于账号账单。
+- **流式用量按最终快照结算**：同一 `message.id` 出现多条增长记录时，对每类 token 取累计最大值，只追加正增量，避免第一条输出不完整或跨轮询重复计数。
+- **缓存 TTL 分账**：Claude 的 5 分钟 cache write、1 小时 cache write 与 cache read 分开统计和计价，不再把 1h 写入套用 5m 单价。
+- **按完整 model id 精确计价与上下文窗口**：从 [LiteLLM 公开价目表](https://github.com/BerriAI/litellm) 同步单价和 context window；未同步模型明确落到家族估算。可用 `~/.octopus/pricing.json` 覆盖（家族键或精确 `models` 映射）：
   ```json
-  { "opus": {"input":15,"output":75,"cacheWrite":18.75,"cacheRead":1.5},
-    "models": { "claude-fable-5": {"input":10,"output":50,"cacheWrite":12.5,"cacheRead":1} } }
+  { "opus": {"input":15,"output":75,"cacheWrite5m":18.75,"cacheWrite1h":30,"cacheRead":1.5},
+    "models": { "claude-fable-5": {"input":10,"output":50,"cacheWrite5m":12.5,"cacheWrite1h":20,"cacheRead":1,"contextWindow":1000000} } }
   ```
   （单位：美元 / 百万 token。）
+- 面板中的 Claude 金额是**按 API 公价折算的本地估算**，不是 Claude 订阅账单；可切换 token / 金额趋势，并显示扫描时间、估算模型、价格表新鲜度和流式修正数等诊断。
 - **重算历史**：改了定价、或想用最新价目纠正过去存错价的历史，跑 `npm run meter:rebuild`（从 transcript 真相源重扫重算、写回 `usage.json`；`--no-sync` 用现有缓存价、`OCTOPUS_NO_NET=1` 完全离线）。
 
 ### 卸载钩子
@@ -183,16 +186,16 @@ test/i18n.js            文案完整性（三语键位对齐 / 占位符 / 梗�
 
 | 项 | 说明 | 现状 / 缓解 |
 |---|---|---|
-| **本地 /permission 伪造** | 任何本机进程都能 POST `/permission` 弹一个假授权气泡 | 仅绑 `127.0.0.1` + loopback 校验；点「允许」只把决策回给持连接者，**无法让 Claude 执行任何东西**；属社工风险 |
-| **本地 /state 伪造** | 本机进程可驱动桌宠动画 / 假气泡 | 仅装饰性，localhost-only |
+| **本地写入接口** | `/state` 与 `/permission` 接收 Claude hook 数据 | 仅绑 `127.0.0.1`，并要求每次启动随机生成的令牌；令牌只存在于权限为 `0600` 的 runtime 文件和当前 Permission hook URL |
 | **钩子残留** | 退出后钩子仍在，Claude Code 每个事件会 spawn 一次钩子（连不上 server，100ms 超时） | 影响极小；托盘可一键卸载 |
-| **定价准确度** | 内置单价为估算，未单独处理 1M 上下文变体 | 可用 `~/.octopus/pricing.json` 覆盖 |
+| **定价与账单差异** | LiteLLM 公价或内置回退价可能晚于厂商变化；订阅套餐也不按 API 公价结算 | 面板明确标为 API 公价折算；显示价格表时间 / 估算模型，可覆盖价格并重算 |
 | **读 transcript** | 读取本机 `~/.claude` 下的会话记录 | 仅本地、仅 token 计数，不外传、不读正文 |
 | **focusSession** | 「去回复」在 macOS / Windows 生效 | Linux 需原生 helper，暂未实现；Windows 上 SetForegroundWindow 受系统前台锁限制，辅以 SwitchToThisWindow 兜底 |
-| **计量去重边界** | 流式重复行若跨两次扫描被切开，可能极小概率重复计数 | 同文件内已去重；概率极低 |
+| **本地历史边界** | 删除 / 截断 transcript 或 rollout 后，本地台账无法代表账号完整历史 | 诊断区显示扫描状态；Claude 可从现存 transcript 重建，Codex 明确标为“本机留存历史” |
+| **表情包素材权利** | 部分用户提供的媒体尚无可核验授权链 | `catalog.json` 强制记录 `provenance`；未核清一律标 `unverified` / 禁止宣称可商用，规范见 `assets/memes/README.md` |
 
 ### 安全加固（已做）
-- HTTP 仅 `127.0.0.1` + loopback 校验；body 上限（state 4KB / permission 1MB）；全字段规范化校验。
+- HTTP 仅 `127.0.0.1` + loopback / Host / Origin 校验 + 每次启动随机令牌；body 上限（state 16KB / permission 1MB）；全字段规范化校验。
 - 配置 / 用量 / settings 全部**原子写**；钩子安装**合并不覆盖**、卸载先备份；settings 被外部清空时自动重注册。
 - Electron：`contextIsolation` 开、`nodeIntegration` 关、拦截外部导航与 `window.open`。
 - assistant 文本截断 + 控制字符清洗；命令行密钥样式标题脱敏（钩子内置）。
