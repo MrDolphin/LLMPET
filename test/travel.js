@@ -400,7 +400,8 @@ async function main() {
   const journalPath = path.join(stateDir, 'wander-home', 'journal.jsonl');
   assert.strictEqual(fs.existsSync(journalPath), true);
   assert(fs.readFileSync(journalPath, 'utf8').includes('旧地图'));
-  assert(fs.readFileSync(path.join(stateDir, 'travel.json'), 'utf8').includes(wanderCwd));
+  const persistedTravel = JSON.parse(fs.readFileSync(path.join(stateDir, 'travel.json'), 'utf8'));
+  assert.strictEqual(persistedTravel.providers.claude.cwd, wanderCwd);
   assert.strictEqual(fs.existsSync(firstVisible.opts.promptFile), false);
   assert.strictEqual(manager.trustWebForSession(firstSessionId), true);
   const wanderedAgain = await manager.start({
