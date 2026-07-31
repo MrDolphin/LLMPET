@@ -39,6 +39,15 @@ function fakeChild(onInput) {
   return child;
 }
 
+function assertPrivateFile(filePath) {
+  const stat = fs.statSync(filePath);
+  assert(stat.isFile(), `${filePath} must be a regular file`);
+  // Windows reports synthetic POSIX mode bits (commonly 0666) even when the
+  // file inherits the user's private ACL. Only Unix platforms can prove 0600
+  // through fs.stat().mode.
+  if (process.platform !== 'win32') assert.strictEqual(stat.mode & 0o777, 0o600);
+}
+
 async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'llmpet-travel-test-'));
   const project = path.join(root, 'project');
@@ -281,8 +290,7 @@ async function main() {
   assert(capturedPrompt.includes('看看最值得做什么'));
   assert.deepStrictEqual(changes.slice(0, 2), ['started', 'progress']);
   assert(changes.includes('completed'));
-  const mode = fs.statSync(path.join(stateDir, 'travel.json')).mode & 0o777;
-  assert.strictEqual(mode, 0o600);
+  assertPrivateFile(path.join(stateDir, 'travel.json'));
   console.log('  ✓ one 10k-token trip earns one leaf and survives restart');
 
   console.log('[TR3b] free wander reuses one durable Claude travel session');
@@ -311,7 +319,7 @@ async function main() {
     firstVisible.opts.args[firstVisible.opts.args.indexOf('--tools') + 1],
     'WebSearch,WebFetch',
   );
-  assert.strictEqual(fs.statSync(firstVisible.opts.promptFile).mode & 0o777, 0o600);
+  assertPrivateFile(firstVisible.opts.promptFile);
   const sessionIdIndex = firstVisible.opts.args.indexOf('--session-id');
   const firstSessionId = firstVisible.opts.args[sessionIdIndex + 1];
   assert.strictEqual(manager.claimsSession(firstSessionId), true);
