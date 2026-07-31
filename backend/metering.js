@@ -232,6 +232,7 @@ function createMetering(options = {}) {
     hourlyByDay: {},      // 'YYYY-MM-DD' -> [24] cost
     hourlyTokensByDay: {},// 'YYYY-MM-DD' -> [24] real token usage
     recent: [],           // [{ ts, cost, tokens }] within RECENT_KEEP_MS, for window5h
+    lifetime: emptyDay(), // never pruned; locally observed Claude total
     diagnostics: {
       lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
       migratedFrom: null, estimatedModels: {},
@@ -257,6 +258,17 @@ function createMetering(options = {}) {
         state.hourlyByDay = raw.hourlyByDay && typeof raw.hourlyByDay === 'object' ? raw.hourlyByDay : {};
         state.hourlyTokensByDay = raw.hourlyTokensByDay && typeof raw.hourlyTokensByDay === 'object' ? raw.hourlyTokensByDay : {};
         state.recent = Array.isArray(raw.recent) ? raw.recent : [];
+        // v2 files created before lifetime existed are migrated from their
+        // retained daily ledger exactly once. New usage then advances this
+        // monotonic counter even after old calendar days are pruned.
+        if (raw.lifetime && typeof raw.lifetime === 'object') {
+          state.lifetime = { ...emptyDay(), ...raw.lifetime };
+        } else {
+          state.lifetime = Object.values(state.daily).reduce((sum, day) => {
+            for (const key of Object.keys(emptyDay())) sum[key] += num(day && day[key]);
+            return sum;
+          }, emptyDay());
+        }
         state.diagnostics = raw.diagnostics && typeof raw.diagnostics === 'object'
           ? { ...state.diagnostics, ...raw.diagnostics } : state.diagnostics;
         state.schemaVersion = STATE_SCHEMA;
@@ -299,7 +311,7 @@ function createMetering(options = {}) {
 
   // Apply a positive usage delta. Message count increments only for the first
   // snapshot; later streaming rows correct token/cost without inventing turns.
-  function recordDelta(tsMs, model, usage, isNew) {
+  function recordDelta(tsMs, model, usage, isNew, countLifetime = true) {
     const input = num(usage.input);
     const output = num(usage.output);
     const cacheWrite5m = num(usage.cacheWrite5m);
@@ -319,6 +331,15 @@ function createMetering(options = {}) {
     d.cacheWrite5m = num(d.cacheWrite5m) + cacheWrite5m;
     d.cacheWrite1h = num(d.cacheWrite1h) + cacheWrite1h;
     d.cacheRead += cacheRead;
+
+    if (countLifetime) {
+      const lifetime = state.lifetime || (state.lifetime = emptyDay());
+      lifetime.cost += cost; lifetime.tokens += tokens; lifetime.msgs += isNew ? 1 : 0;
+      lifetime.input += input; lifetime.output += output; lifetime.cacheCreate += cacheCreate;
+      lifetime.cacheWrite5m = num(lifetime.cacheWrite5m) + cacheWrite5m;
+      lifetime.cacheWrite1h = num(lifetime.cacheWrite1h) + cacheWrite1h;
+      lifetime.cacheRead += cacheRead;
+    }
 
     const fam = (state.byModelByDay[k] = state.byModelByDay[k] || {});
     const mk = model || 'unknown';
@@ -483,7 +504,16 @@ function createMetering(options = {}) {
       daily[k] = { cost: v.cost, tokens: v.tokens, msgs: v.msgs };
     }
 
-    return { today, window5h, byModel, hourly, hourlyTok, daily, diagnostics: diagnostics() };
+    return {
+      today,
+      lifetime: { ...emptyDay(), ...(state.lifetime || {}) },
+      window5h,
+      byModel,
+      hourly,
+      hourlyTok,
+      daily,
+      diagnostics: diagnostics(),
+    };
   }
 
   // Re-read the price table (call after a LiteLLM sync lands a fresh cache).
@@ -528,6 +558,7 @@ function createMetering(options = {}) {
     state.hourlyByDay = {};
     state.hourlyTokensByDay = {};
     state.recent = [];
+    state.lifetime = emptyDay();
     state.diagnostics = {
       lastScanTs: 0, scannedFiles: 0, records: 0, streamingCorrections: 0,
       migratedFrom: null, estimatedModels: {},
@@ -551,7 +582,9 @@ function createMetering(options = {}) {
     resetAggregates();
     const rows = Object.values(state.records).sort((a, b) => a.ts - b.ts);
     for (const rec of rows) {
-      recordDelta(rec.ts, rec.model, rec.usage, true);
+      // Repricing rebuilds the retained calendar/cost views. Lifetime token
+      // progression has already counted these records and must not advance.
+      recordDelta(rec.ts, rec.model, rec.usage, true, false);
       const norm = normModelName(rec.model);
       if (!norm || !(pricing._models && pricing._models[norm])) {
         const estimates = state.diagnostics.estimatedModels;

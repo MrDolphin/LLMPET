@@ -38,6 +38,8 @@ assert.strictEqual(stats.today.cacheWrite5m, 20);
 assert.strictEqual(stats.today.cacheWrite1h, 100);
 assert.strictEqual(stats.today.cacheCreate, 120);
 assert.strictEqual(stats.today.tokens, 4 + 372 + 20 + 100 + 50);
+assert.strictEqual(stats.lifetime.tokens, stats.today.tokens, 'Claude lifetime must advance with deduplicated usage');
+assert.strictEqual(stats.lifetime.msgs, 1, 'streaming corrections must not create lifetime turns');
 assert.strictEqual(stats.hourlyTok.reduce((a, b) => a + b, 0), stats.today.tokens);
 assert.strictEqual(stats.diagnostics.streamingCorrections, 1);
 assert.strictEqual(stats.diagnostics.records, 1);
@@ -45,6 +47,14 @@ assert.strictEqual(stats.diagnostics.records, 1);
 // Opus 4.1 fallback: input 15, output 75, 5m write 18.75, 1h write 30, read 1.5.
 const expectedCost = (4 * 15 + 372 * 75 + 20 * 18.75 + 100 * 30 + 50 * 1.5) / 1e6;
 assert(Math.abs(stats.today.cost - expectedCost) < 1e-12);
+
+const lifetimeBeforeReprice = meter.getStats().lifetime.tokens;
+meter.reloadPricing();
+assert.strictEqual(
+  meter.getStats().lifetime.tokens,
+  lifetimeBeforeReprice,
+  'repricing retained records must not double-count lifetime progression',
+);
 
 meter.stop();
 fs.rmSync(root, { recursive: true, force: true });

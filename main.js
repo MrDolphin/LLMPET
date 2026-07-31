@@ -28,9 +28,11 @@ const adapter = require('./backend/adapter');
 const hooks = require('./backend/hooks');
 const { focusSession } = require('./backend/focus');
 const { createTerritory, DEFAULT_RIVALS } = require('./backend/territory');
-const { launchClaude, launchCodex } = require('./backend/launch');
+const { launchClaude, launchCodex, findCli } = require('./backend/launch');
 const { createCodexWatch } = require('./backend/codex-watch');
 const { createCodexMetering } = require('./backend/codex-metering');
+const { createTravelManager } = require('./backend/travel');
+const { machineGrowth } = require('./backend/growth');
 const { publicCatalog, getMeme, watchCatalog } = require('./backend/meme-catalog');
 const { createCommandDispatcher, routeForSession } = require('./backend/command-dispatch');
 const transport = require('./backend/transport');
@@ -58,6 +60,7 @@ let stopWatcher = null;
 let territory = null;
 let codexWatch = null;  // Codex rollout 只读监听器
 let codexMetering = null; // Codex rollout 累计 token 台账（与状态 watcher 解耦）
+let travelManager = null; // 独立只读旅行任务 + 明信片/成长台账
 let commandDispatcher = null;
 let stopMemeWatcher = null;
 let codexLimits = null; // Codex 5h/周窗口配额（token_count 的 rate_limits）
@@ -513,7 +516,18 @@ function filterSnapshot(snap, agent) {
 }
 
 function buildStats(agent = 'all', snapshot = null) {
-  const snap = filterSnapshot(snapshot || core.buildSnapshot(), agent);
+  if (travelManager && core) {
+    for (const session of core.sessions.values()) {
+      travelManager.decorateSession(session, adapter.agentOf(session));
+    }
+  }
+  const rawSnapshot = snapshot || core.buildSnapshot();
+  if (travelManager && rawSnapshot && Array.isArray(rawSnapshot.sessions)) {
+    for (const session of rawSnapshot.sessions) {
+      travelManager.decorateSession(session, adapter.agentOf(session));
+    }
+  }
+  const snap = filterSnapshot(rawSnapshot, agent);
   const meter = metering ? metering.getStats() : null;
   const codexUsage = codexMetering ? codexMetering.getStats() : null;
   // 授权（HTTP 阻塞钩子）只存在于 Claude 路径；Codex 宠不认领
@@ -521,12 +535,17 @@ function buildStats(agent = 'all', snapshot = null) {
   const ops = (agent === 'all'
     ? recentOps
     : recentOps.filter((o) => (o.agent || 'claude') === agent)).slice(0, 30);
-  return adapter.buildPetStats(snap, pending, meter, {
+  const stats = adapter.buildPetStats(snap, pending, meter, {
     lastOps: ops,
     codexLimits,
     codexUsage,
     usageProvider: agent === 'codex' ? 'codex' : 'claude',
   });
+  // Travel sessions are already present in the Claude/Codex ledgers, so the
+  // machine total is the two provider lifetimes only—never travel + providers.
+  stats.machineGrowth = machineGrowth(meter, codexUsage);
+  stats.travel = travelManager ? travelManager.publicState(i18n.getLang()) : null;
+  return stats;
 }
 
 // Record operation/say events into the ring the panel renders as the op stream.
@@ -577,11 +596,27 @@ function startMemeWatcher() {
 function bootBackend() {
   core = createCore({
     onActivity: (act) => {
+      const claimedByTravel = travelManager && travelManager.observeActivity({
+        ...act,
+        agent: adapter.agentOf(act.session),
+      });
+      if (claimedByTravel) return;
       for (const ev of adapter.activityToEvents(act)) { recordOp(ev); sendPetEvent(ev); }
     },
     onDirty: scheduleEmit,
   });
   core.startStaleCleanup();
+  travelManager = createTravelManager({
+    onChange: (event) => {
+      const tripAgent = event && event.trip && event.trip.agent;
+      for (const st of petStates()) {
+        if (!tripAgent || st.agent === 'all' || st.agent === tripAgent) {
+          sendWin(st.win, 'pet:travel', event);
+        }
+      }
+      scheduleEmit();
+    },
+  });
   commandDispatcher = createCommandDispatcher({
     copyText: (text) => clipboard.writeText(text),
     focusSession,
@@ -634,11 +669,22 @@ function bootBackend() {
   }
 
   permissions = createPermissions({
-    // muted only silences sound (renderer-side); it is NOT do-not-disturb, so we
-    // never auto-drop permission requests here.
+    // muted only silences sound (renderer-side); it is NOT do-not-disturb.
+    // Travel requests intentionally remain here: their dedicated conversation
+    // is a normal pet card and renders a stable "travel letter" approval.
     shouldDrop: () => false,
     onAdded: (entry) => {
-      const lite = (() => { const s = core.getSession(entry.sessionId); return s ? toEntryLite(s) : null; })();
+      let lite = (() => { const s = core.getSession(entry.sessionId); return s ? toEntryLite(s) : null; })();
+      if (lite && travelManager) travelManager.decorateSession(lite, adapter.agentOf(lite));
+      const travel = !!(travelManager && travelManager.claimsSession(entry.sessionId));
+      if (!lite && travel) {
+        lite = {
+          id: entry.sessionId,
+          agentId: 'claude-code',
+          sessionRole: 'travel',
+          travelAgent: 'claude',
+        };
+      }
       let choice, kind, reason;
       if (entry.isElicitation) {
         choice = adapter.buildElicitationChoice(
@@ -650,7 +696,16 @@ function bootBackend() {
         kind = 'needsinput'; reason = 'plan';
       } else {
         choice = adapter.buildPermChoice(
-          { id: entry.id, sessionId: entry.sessionId, toolName: entry.toolName, toolInput: entry.toolInput, suggestions: entry.suggestions }, lite);
+          {
+            id: entry.id,
+            sessionId: entry.sessionId,
+            toolName: entry.toolName,
+            toolInput: entry.toolInput,
+            suggestions: entry.suggestions,
+            travel,
+          },
+          lite,
+        );
         kind = 'waiting'; reason = 'perm';
       }
       // A parked permission needs the user's eyes. In menubar mode (or if the pet
@@ -693,7 +748,14 @@ function bootBackend() {
 
 // minimal entry shape for adapter.projectName()
 function toEntryLite(s) {
-  return { id: s.id, cwd: s.cwd, sessionTitle: s.sessionTitle };
+  return {
+    id: s.id,
+    cwd: s.cwd,
+    sessionTitle: s.sessionTitle,
+    agentId: s.agentId,
+    sessionRole: s.sessionRole,
+    travelAgent: s.travelAgent,
+  };
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────────
@@ -774,12 +836,88 @@ function registerIpc() {
   });
 
   ipcMain.on('permission-decide', (_e, permId, behavior) => {
+    if (behavior === 'travel:always-web') {
+      const pending = permissions.getPending().find((entry) => entry.id === permId);
+      if (pending && travelManager) travelManager.trustWebForSession(pending.sessionId);
+      permissions.decide(permId, 'allow');
+      return;
+    }
     permissions.decide(permId, behavior);
   });
   ipcMain.on('focus-session', (_e, sessionId) => {
     focusSession(core.getSession(sessionId));
   });
   ipcMain.handle('meme-catalog', () => publicCatalog(i18n.getLang()));
+  ipcMain.handle('travel-get', () => (
+    travelManager ? travelManager.publicState(i18n.getLang()) : null
+  ));
+  ipcMain.handle('travel-postcards', () => (
+    travelManager ? travelManager.publicPostcards(30) : []
+  ));
+  ipcMain.handle('travel-start', async (e, sessionId, templateId, mission) => {
+    if (!travelManager || !core || typeof sessionId !== 'string') {
+      return { ok: false, code: 'not-ready' };
+    }
+    const session = core.getSession(sessionId);
+    if (!session || session.headless || session.ended || !session.cwd) {
+      return { ok: false, code: 'invalid-target', state: travelManager.publicState(i18n.getLang()) };
+    }
+    const senderState = stateOfSender(e.sender);
+    const agent = adapter.agentOf(session);
+    if (!senderState || (senderState.agent !== 'all' && senderState.agent !== agent)) {
+      return { ok: false, code: 'foreign-target', state: travelManager.publicState(i18n.getLang()) };
+    }
+    return travelManager.start({
+      agent,
+      cwd: session.cwd,
+      project: session.sessionTitle || path.basename(session.cwd) || String(session.id).slice(-6),
+      templateId,
+      mission,
+      locale: i18n.getLang(),
+    });
+  });
+  ipcMain.handle('travel-wander', async (e) => {
+    if (!travelManager) return { ok: false, code: 'not-ready' };
+    const senderState = stateOfSender(e.sender);
+    if (!senderState) return { ok: false, code: 'foreign-target' };
+
+    // Free wander never receives a session, cwd, project name, or transcript.
+    // A split pet uses its own provider. A combined pet alternates between the
+    // locally installed providers, independently of every monitored session.
+    let agent = senderState.agent;
+    if (agent === 'all') {
+      const history = travelManager.publicState(i18n.getLang()).history || [];
+      const lastWander = history.find((trip) => trip && trip.mode === 'wander');
+      const order = lastWander && lastWander.agent === 'claude'
+        ? ['codex', 'claude']
+        : ['claude', 'codex'];
+      agent = order.find((name) => {
+        const cli = findCli(name);
+        return path.isAbsolute(cli) && fs.existsSync(cli);
+      }) || null;
+    }
+    if (!agent) return { ok: false, code: 'not-ready' };
+    return travelManager.start({
+      agent,
+      mode: 'wander',
+      templateId: 'free-roam',
+      locale: i18n.getLang(),
+    });
+  });
+  ipcMain.handle('travel-cancel', (e) => {
+    if (!travelManager) return { ok: false, code: 'not-ready' };
+    const current = travelManager.publicState(i18n.getLang()).active;
+    const senderState = stateOfSender(e.sender);
+    if (
+      current &&
+      senderState &&
+      senderState.agent !== 'all' &&
+      senderState.agent !== current.agent
+    ) {
+      return { ok: false, code: 'foreign-target', state: travelManager.publicState(i18n.getLang()) };
+    }
+    return travelManager.cancel();
+  });
   ipcMain.handle('meme-trigger', async (e, sessionId, memeId) => {
     // The prompt itself is localized too: an English UI that fires a Chinese
     // prompt would drag the whole session into Chinese.
@@ -1122,6 +1260,7 @@ app.on('window-all-closed', () => { /* tray app: stay alive */ });
 
 app.on('before-quit', () => {
   try { if (territory) territory.stop(); } catch {}
+  try { if (travelManager) travelManager.shutdown(); } catch {}
   try { if (codexWatch) codexWatch.stop(); } catch {}
   try { if (stopMemeWatcher) stopMemeWatcher(); } catch {}
   try { if (stopWatcher) stopWatcher(); } catch {}

@@ -36,7 +36,7 @@ assert(/class="ask-scroll"[^>]*>[\s\S]*class="ask-card"[\s\S]*class="ask-toolbar
 assert(/id="ask-back"[\s\S]*id="ask-submit"[\s\S]*id="ask-term"/s.test(html), 'footer actions should use back, submit, terminal order');
 assert(/const POPUP_W = 520;/.test(js), 'popup window should provide more horizontal room');
 assert(/const ASK_VIEWPORT_MAX_H = 520;/.test(js), 'ask measurement must use the same vertical cap');
-assert(/window\.innerWidth[^\n]*POPUP_W/.test(js), 'fitPopup must resize width before measuring content height');
+assert(/window\.innerWidth[^\n]*targetW/.test(js), 'fitPopup must resize to the active surface width before measuring content height');
 assert(/askScroll\.scrollTop\s*=\s*0/.test(js), 'switching questions or sessions must reset only the content scroll position');
 assert(/\.sesslist\s*\{[^}]*max-height\s*:\s*calc\(100vh - 70px\)[^}]*overflow\s*:\s*hidden\s*;/s.test(css),
   'session popup shell must clip to the viewport instead of spilling across the desktop');
@@ -48,5 +48,28 @@ assert(/\.sl-foot\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),
   'session footer must remain fixed while rows scroll');
 assert(/\.sl-meme-grid\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
   'meme choices must share the same bounded scrolling contract');
+assert(/\.sl-travel-view\s*\{[^}]*min-height\s*:\s*0\s*;[^}]*flex\s*:\s*1 1 auto\s*;[^}]*overflow-y\s*:\s*auto\s*;/s.test(css),
+  'travel page must own bounded vertical scrolling');
+assert(/\.sl-travel-view\s*>\s*\*\s*\{[^}]*flex\s*:\s*0 0 auto\s*;/s.test(css),
+  'travel sections must overflow into the page scroller instead of shrinking and clipping');
+assert(/\.sl-travel-view::-webkit-scrollbar\s*\{[^}]*width\s*:\s*7px\s*;/s.test(css),
+  'travel page must expose a visible vertical scroll affordance');
+assert(/\.sl-travel-ranks\s*\{[^}]*grid-template-columns\s*:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s.test(css),
+  'travel and whole-machine ranks must share one compact row');
+assert(/id="sl-travel-rank-icons"[\s\S]*id="sl-machine-rank-icons"/s.test(html),
+  'travel page must expose separate travel and whole-machine progression');
+assert(/\.sl-travel-library\s*\{[^}]*grid-template-columns\s*:\s*148px minmax\(0,\s*1fr\)\s*;/s.test(css),
+  'postcard album must live in a fixed sidebar beside the selected postcard');
+assert(/\.sl-travel-postcard-text\s*\{[^}]*height\s*:\s*236px\s*;[^}]*overflow\s*:\s*hidden\s*;/s.test(css),
+  'one postcard must fit as a complete page without a nested scrollbar');
+assert(/\.sl-travel-stop-track\s*\{[^}]*overflow\s*:\s*hidden\s*;/s.test(css)
+  && /\.sl-travel-stop-card\s*\{[^}]*display\s*:\s*none\s*;/s.test(css)
+  && /\.sl-travel-stop-card\.active\s*\{[^}]*display\s*:\s*block\s*;/s.test(css),
+  'station navigation must show exactly one postcard instead of horizontally bleeding adjacent cards');
+assert(/\.sl-travel-history::-webkit-scrollbar\s*\{[^}]*width\s*:\s*6px\s*;/s.test(css),
+  'postcard album must visibly advertise additional saved trips');
+assert(/class="sl-travel-library"[\s\S]*class="sl-travel-album"[\s\S]*id="sl-travel-history"[\s\S]*id="sl-travel-postcard"/s.test(html),
+  'postcard history must precede the selected postcard inside the side-by-side library');
+assert(/const TRAVEL_POPUP_W = 760;/.test(js), 'travel library needs a wider surface than ordinary session popups');
 
 console.log('popup style checks passed');

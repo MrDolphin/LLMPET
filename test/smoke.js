@@ -20,6 +20,7 @@ const core = createCore({
   onDirty: () => { dirtyCount++; },
 });
 const permissions = createPermissions({
+  shouldDrop: () => false,
   onAdded: (entry) => { events.push({ kind: 'waiting', permId: entry.id, sessionId: entry.sessionId }); },
   onChange: () => {},
 });
@@ -169,6 +170,37 @@ async function main() {
   console.log('\n[6] passthrough tool auto-allowed (not held)');
   const ptResp = await post('/permission', { tool_name: 'TaskCreate', tool_input: {}, session_id: 'pt' });
   check('TaskCreate auto-allow', () => assert.strictEqual(JSON.parse(ptResp.body).hookSpecificOutput.decision.behavior, 'allow'));
+
+  console.log('\n[6b] dedicated travel session keeps a stable letter in the pet');
+  const travelSid = 'travel-dedicated-session';
+  await post('/state', {
+    state: 'working',
+    event: 'PreToolUse',
+    tool_name: 'WebFetch',
+    session_id: travelSid,
+    cwd: '/Users/me/.octopus/wander-home/sessions/claude',
+  });
+  core.getSession(travelSid).sessionRole = 'travel';
+  core.getSession(travelSid).travelAgent = 'claude';
+  const travelPermission = post('/permission', {
+    tool_name: 'WebFetch',
+    tool_input: { url: 'https://example.com' },
+    session_id: travelSid,
+  });
+  await sleep(30);
+  const travelPending = permissions.getPending().find((entry) => entry.sessionId === travelSid);
+  check('travel permission remains pending until the user answers', () => {
+    assert(travelPending);
+  });
+  const travelStats = adapter.buildPetStats(core.buildSnapshot(), permissions.getPending(), null);
+  check('travel permission is a first-class letter with reusable web approval', () => {
+    const session = travelStats.sessions.find((item) => item.sessionId === travelSid);
+    assert(session && session.choice && session.choice.travel === true);
+    assert.strictEqual(session.project, 'Claude 旅行信箱');
+    assert(session.choice.options.some((option) => option.key === 'travel:always-web'));
+  });
+  permissions.decide(travelPending.id, 'allow');
+  await travelPermission;
 
   console.log('\n[7] 并行事件保留权限卡；只在 SessionEnd 无裁决清理');
   const sweepSid = 'sweep-session-dddd';

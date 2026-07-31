@@ -73,6 +73,10 @@ function errorMessage(type) {
 }
 
 function projectName(entry) {
+  if (entry.sessionRole === 'travel') {
+    const who = agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
+    return t('travel.sessionName', { who });
+  }
   if (entry.sessionTitle) return entry.sessionTitle;
   if (entry.cwd) return path.basename(entry.cwd) || entry.cwd;
   return String(entry.id || '').slice(-6) || t('sess.fallbackName');
@@ -164,23 +168,39 @@ function suggestionLabel(sg) {
 }
 
 function buildPermChoice(perm, entry) {
-  const options = [{ label: t('perm.allow'), key: 'allow' }];
+  const travel = !!(perm.travel || (entry && entry.sessionRole === 'travel'));
+  const options = [{
+    label: travel ? t('travel.allowOnce') : t('perm.allow'),
+    key: 'allow',
+  }];
+  if (
+    travel &&
+    (perm.toolName === 'WebSearch' || perm.toolName === 'WebFetch')
+  ) {
+    options.push({ label: t('travel.alwaysAllowWeb'), key: 'travel:always-web' });
+  }
   const sgs = Array.isArray(perm.suggestions) ? perm.suggestions : [];
   for (let i = 0; i < sgs.length && i < 4; i++) {
     const lbl = suggestionLabel(sgs[i]);
     if (lbl) options.push({ label: lbl, key: 'suggestion:' + i });
   }
-  options.push({ label: t('perm.deny'), key: 'deny' });
+  options.push({
+    label: travel ? t('travel.denyTrip') : t('perm.deny'),
+    key: 'deny',
+  });
+  const who = entry && agentOf(entry) === 'codex' ? 'Codex' : 'Claude';
+  const action = humanizeTool(perm.toolName, perm.toolInput);
   return {
     kind: 'perm',
     sessionId: perm.sessionId,
     permId: perm.id,
     project: entry ? projectName(entry) : (perm.sessionId || '?'),
-    header: perm.toolName,
-    question: humanizeTool(perm.toolName, perm.toolInput),
+    header: travel ? t('travel.letterFrom', { who }) : perm.toolName,
+    question: travel ? t('travel.letterQuestion', { action }) : action,
     options,
     multi: false,
     allowInput: false,
+    travel,
   };
 }
 
@@ -304,6 +324,8 @@ function buildPetStats(snapshot, pendingPermissions, metering, opts) {
         : null,
       sessionId: e.id,
       headless: e.headless,
+      sessionRole: e.sessionRole || null,
+      travelAgent: e.travelAgent || null,
       badge: e.badge,
       model: e.model || null,
       // context-window usage % (for the session-list HUD badge), null if unknown

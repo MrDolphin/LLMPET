@@ -87,7 +87,8 @@ function sendPermissionResponse(res, decision) {
 function createPermissions(options = {}) {
   const onAdded = typeof options.onAdded === 'function' ? options.onAdded : () => {};
   const onChange = typeof options.onChange === 'function' ? options.onChange : () => {};
-  // shouldDrop() → true when DND/disabled: let CC fall back to its own prompt.
+  // shouldDrop(parsed) → true only when another surface intentionally owns the
+  // request and wants Claude Code to fall back to its terminal prompt.
   const shouldDrop = typeof options.shouldDrop === 'function' ? options.shouldDrop : () => false;
 
   /** @type {Map<string, object>} */
@@ -167,8 +168,8 @@ function createPermissions(options = {}) {
   // Ingress from the HTTP /permission route. `parsed` is already normalized by
   // server.js: { toolName, toolInput, suggestions, sessionId, agentId, headless }.
   function addPermission(res, parsed) {
-    // DND / agent disabled → don't answer; CC shows its own terminal prompt.
-    if (shouldDrop()) { destroy(res); return; }
+    // An explicitly external surface may opt out before a card is created.
+    if (shouldDrop(parsed)) { destroy(res); return; }
 
     const toolName = parsed.toolName || 'Unknown';
     const sessionId = parsed.sessionId || 'default';

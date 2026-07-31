@@ -117,7 +117,7 @@ function createStubWorld() {
   };
 
   // Captured renderer callbacks (registered via window.pet.onX)
-  const handlers = { event: null, stats: null, config: null, meme: null, memeCatalogChanged: null };
+  const handlers = { event: null, stats: null, config: null, meme: null, travel: null, memeCatalogChanged: null };
   const calls = []; // record of preload calls for assertions
 
   const pet = {
@@ -125,11 +125,17 @@ function createStubWorld() {
     onStats: (cb) => { handlers.stats = cb; },
     onConfig: (cb) => { handlers.config = cb; },
     onMeme: (cb) => { handlers.meme = cb; },
+    onTravel: (cb) => { handlers.travel = cb; },
     onMemeCatalogChanged: (cb) => { handlers.memeCatalogChanged = cb; },
     getStats: () => Promise.resolve(null),
     getConfig: () => Promise.resolve(null),
     getMemeCatalog: () => Promise.resolve({ schemaVersion: 2, items: [] }),
     triggerMeme: (...a) => { calls.push(['triggerMeme', a]); return Promise.resolve({ ok: true, submitted: true }); },
+    getTravel: () => Promise.resolve({ active: null, latest: null, growth: { totalTokens: 0, completed: 0, rank: {} }, templates: [] }),
+    getTravelPostcards: () => Promise.resolve([]),
+    startTravel: (...a) => { calls.push(['startTravel', a]); return Promise.resolve({ ok: true }); },
+    wanderTravel: () => { calls.push(['wanderTravel']); return Promise.resolve({ ok: true }); },
+    cancelTravel: () => { calls.push(['cancelTravel']); return Promise.resolve({ ok: true }); },
     getWinPos: () => Promise.resolve([0, 0]),
     setWinPos: (...a) => calls.push(['setWinPos', a]),
     setPetSize: (...a) => calls.push(['setPetSize', a]),
@@ -141,6 +147,7 @@ function createStubWorld() {
     quit: () => calls.push(['quit']),
     launchClaude: () => calls.push(['launchClaude']),
     focusSession: (...a) => calls.push(['focusSession', a]),
+    focusPet: () => calls.push(['focusPet']),
     blurPet: () => calls.push(['blurPet']),
     decidePermission: (...a) => calls.push(['decidePermission', a]),
     petLog: () => {},

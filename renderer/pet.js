@@ -15,6 +15,7 @@ const cat = document.getElementById('cat');
 // 图标款按状态换眼神（每种状态一张只改眼睛的图）
 const MASCOT_EYES = {
   working: 'mascot-work.png', // 干活：对着笔记本敲代码 + 咖啡（整幅工作场景）
+  roam: 'mascot.png',        // 旅行：使用完整站姿，容器负责走路动画
   juggling: 'mascot-work.png', // 并行子任务：无独立图，回落到干活
   sweeping: 'mascot-work.png', // 清理上下文：无独立图，回落到干活
   loafing: 'mascot-sleep.png', // 间隙摸鱼：无独立图，回落到闭眼待机
@@ -222,6 +223,31 @@ const slMemeView = document.getElementById('sl-meme-view');
 const slMemeSession = document.getElementById('sl-meme-session');
 const slMemeGrid = document.getElementById('sl-meme-grid');
 const slMemeStatus = document.getElementById('sl-meme-status');
+const slTravelView = document.getElementById('sl-travel-view');
+const slTravelSession = document.getElementById('sl-travel-session');
+const slTravelRankIcons = document.getElementById('sl-travel-rank-icons');
+const slTravelRankMeta = document.getElementById('sl-travel-rank-meta');
+const slMachineRankIcons = document.getElementById('sl-machine-rank-icons');
+const slMachineRankMeta = document.getElementById('sl-machine-rank-meta');
+const slTravelSetup = document.getElementById('sl-travel-setup');
+const slTravelTemplates = document.getElementById('sl-travel-templates');
+const slTravelMission = document.getElementById('sl-travel-mission');
+const slTravelStart = document.getElementById('sl-travel-start');
+const slTravelActive = document.getElementById('sl-travel-active');
+const slTravelActiveStatus = document.getElementById('sl-travel-active-status');
+const slTravelActiveMission = document.getElementById('sl-travel-active-mission');
+const slTravelCancel = document.getElementById('sl-travel-cancel');
+const slTravelPostcard = document.getElementById('sl-travel-postcard');
+const slTravelPostcardMeta = document.getElementById('sl-travel-postcard-meta');
+const slTravelStopTrack = document.getElementById('sl-travel-stop-track');
+const slTravelStopPrev = document.getElementById('sl-travel-stop-prev');
+const slTravelStopNext = document.getElementById('sl-travel-stop-next');
+const slTravelStopPage = document.getElementById('sl-travel-stop-page');
+const slTravelMailboxes = document.getElementById('sl-travel-mailboxes');
+const slTravelHistory = document.getElementById('sl-travel-history');
+const slTravelStatus = document.getElementById('sl-travel-status');
+const slWander = document.getElementById('sl-wander');
+const slTravelInbox = document.getElementById('sl-travel-inbox');
 const slSearch = document.getElementById('sl-search');
 const slFilters = document.getElementById('sl-filters');
 const slArchivedToggle = document.getElementById('sl-archived-toggle');
@@ -262,6 +288,7 @@ const choiceKey = (c) => (c && (c.sessionId || '') + '|' + (c.project || '') + '
 // 避免固定大窗口留白 / 顶屏被下移。先扩到目标宽度再量高度：如果在基础
 // 320px 窄窗里先测，长文本会被过度换行，错误地把弹层撑到整屏高。
 const POPUP_W = 520;
+const TRAVEL_POPUP_W = 760;
 const POPUP_BOTTOM = 200;
 const ASK_VIEWPORT_MAX_H = 520;
 const MEME_WINDOW_W = 760;
@@ -286,6 +313,9 @@ function fitPopup(el) {
   requestAnimationFrame(() => {
     const measure = () => {
       if (seq !== fitPopupSeq) return;
+      const popupW = el === sesslist && slTravelView && !slTravelView.classList.contains('hidden')
+        ? TRAVEL_POPUP_W
+        : POPUP_W;
       // 关键：先临时去掉 max-height 再量，否则 scrollHeight 会被「当前小窗口算出的
       // max-height」钳住（鸡生蛋问题）→ 窗口永远只长一点点、列表只剩 1 行+滚动条。
       const prev = el.style.maxHeight;
@@ -294,12 +324,15 @@ function fitPopup(el) {
       el.style.maxHeight = prev;
       const viewportH = el === askEl ? Math.min(contentH, ASK_VIEWPORT_MAX_H) : contentH;
       const winH = Math.max(340, POPUP_BOTTOM + viewportH + 24);
-      setRequestedPetSize(POPUP_W, winH);
+      setRequestedPetSize(popupW, winH);
     };
 
-    if (Math.abs((window.innerWidth || 0) - POPUP_W) > 2) {
+    const targetW = el === sesslist && slTravelView && !slTravelView.classList.contains('hidden')
+      ? TRAVEL_POPUP_W
+      : POPUP_W;
+    if (Math.abs((window.innerWidth || 0) - targetW) > 2) {
       // 第一拍只扩宽，第二拍在正确的横向排版下测真实高度。
-      setRequestedPetSize(POPUP_W, Math.max(340, window.innerHeight || 340));
+      setRequestedPetSize(targetW, Math.max(340, window.innerHeight || 340));
       requestAnimationFrame(() => requestAnimationFrame(measure));
     } else {
       measure();
@@ -360,6 +393,7 @@ function showAskPanel() {
   const c = askQueue[askIdx];
   if (!c) { hideAsk(); return; }
   if (sessListOpen) closeSessList(); // 卡片优先于会话列表
+  askEl.classList.toggle('travel-letter', c.travel === true);
 
   const sess = c.sessionId ? ' · #' + String(c.sessionId).slice(-3) : '';
   const queue = askQueue.length > 1 ? `${askIdx + 1}/${askQueue.length} · ` : '';
@@ -394,6 +428,7 @@ function clearAskBody() {
   askPage.textContent = '';
   askInputRow.classList.add('hidden');
   askText.value = '';
+  askTerm.textContent = t('ask.goTerminal');
 }
 
 // ① elicitation（AskUserQuestion）：多选项卡 + Other + 分页 + Submit/Back
@@ -523,7 +558,7 @@ function elicBack(c) {
 // ② 授权：允许(绿)/拒绝(红) + 可选「始终允许」建议按钮(中性)
 function renderPerm(c) {
   clearAskBody();
-  askLabel.textContent = t('ask.needPerm');
+  askLabel.textContent = c.travel ? t('travel.letterLabel') : t('ask.needPerm');
   askQhead.textContent = c.header || '';
   askQ.textContent = c.question || t('ask.needPermQ');
   const opts = c.options || [];
@@ -537,6 +572,7 @@ function renderPerm(c) {
     askOpts.appendChild(card);
   });
   askFoot.classList.add('hidden');
+  if (c.travel) askTerm.textContent = t('travel.openTerminal');
   askTerm.classList.remove('hidden');
 }
 
@@ -681,11 +717,14 @@ function renderTodoPop() {
 // 一张「需要你处理」卡片：问题 + 选项按钮(可点即答) + 自定义输入
 function buildActCard(c) {
   const card = document.createElement('div');
-  card.className = 'tp-act';
-  const kindTag = c.kind === 'perm' ? t('ask.kindPerm') : c.kind === 'continue' ? t('ask.kindContinue') : c.kind === 'plan' ? t('ask.kindPlan') : t('ask.kindChoice');
+  card.className = 'tp-act' + (c.travel ? ' travel-letter' : '');
+  const kindTag = c.travel ? t('travel.letterLabel')
+    : c.kind === 'perm' ? t('ask.kindPerm')
+      : c.kind === 'continue' ? t('ask.kindContinue')
+        : c.kind === 'plan' ? t('ask.kindPlan') : t('ask.kindChoice');
   const head = document.createElement('div');
   head.className = 'tp-act-proj';
-  head.textContent = `📂 ${c.project || '?'} · ${kindTag}`;
+  head.textContent = `${c.travel ? '✉️' : '📂'} ${c.project || '?'} · ${kindTag}`;
   card.appendChild(head);
   const q = document.createElement('div');
   q.className = 'tp-act-q';
@@ -766,6 +805,14 @@ let memeTarget = null;
 let memeTimer = null;
 let memeAudio = null;
 let memeCatalogRefreshTimer = null;
+let travelTarget = null;
+let travelData = null;
+let travelPostcards = [];
+let selectedPostcardId = null;
+let selectedPostcardStop = 0;
+let renderedPostcardKey = '';
+let travelTemplateId = null;
+let travelMissionDirty = false;
 // Claude 橙色 burst（小图标）
 const CLAUDE_ICON =
   '<svg viewBox="0 0 24 24" fill="#d97757"><path d="M12 1l2.2 6.3L20.5 5l-4 5.4 6.5 1.6-6.5 1.6 4 5.4-6.3-2.3L12 23l-2.2-6.3L3.5 19l4-5.4L1 12l6.5-1.6-4-5.4 6.3 2.3z"/></svg>';
@@ -811,7 +858,11 @@ function sessionDotClass(s) {
 
 function visibleSessions() {
   return (curSessions || [])
-    .filter((s) => !!s && !s.headless && (s.state !== 'sleeping' || (showArchived && isArchivedSession(s))))
+    // Dedicated travel sessions live in their own mailbox. They remain in the
+    // stats/permission model (so a letter cannot flash away), but do not count
+    // as ordinary project tasks.
+    .filter((s) => !!s && s.sessionRole !== 'travel')
+    .filter((s) => !s.headless && (s.state !== 'sleeping' || (showArchived && isArchivedSession(s))))
     .filter((s) => showArchived ? isArchivedSession(s) : !isArchivedSession(s))
     .filter((s) => {
       if (sessionFilter === 'attention') return ['waiting', 'needsinput', 'error'].includes(s.state);
@@ -837,6 +888,18 @@ function visibleSessions() {
 
 function renderSessList() {
   const list = visibleSessions();
+  if (slTravelInbox) {
+    const waitingLetters = (curSessions || []).filter((session) => (
+      session &&
+      session.sessionRole === 'travel' &&
+      session.choice &&
+      (session.state === 'waiting' || session.state === 'needsinput')
+    )).length;
+    slTravelInbox.textContent = waitingLetters
+      ? `${t('travel.inboxEntry')} · ${waitingLetters}`
+      : t('travel.inboxEntry');
+    slTravelInbox.classList.toggle('has-letter', waitingLetters > 0);
+  }
   slSub.textContent = list.length ? t('sess.count', { n: list.length }) : '';
   slRows.innerHTML = '';
   if (!list.length) {
@@ -872,15 +935,25 @@ function renderSessList() {
       `<div class="sl-meta ${attn ? 'attn' : ''}">${esc(meta)}</div></div>` +
       ctx +
       `<button class="sl-meme-entry" title="${esc(t('meme.entryTitle'))}">${esc(t('meme.entry'))}</button>` +
+      `<button class="sl-travel-entry" title="${esc(t('travel.entryTitle'))}">🧳</button>` +
       `<span class="sl-actions">` +
       `<button class="sl-action pin ${pinned ? 'active' : ''}" title="${esc(t(pinned ? 'sess.unpin' : 'sess.pin'))}">★</button>` +
       `<button class="sl-action archive ${archived ? 'active' : ''}" title="${esc(t(archived ? 'sess.unarchive' : 'sess.archive'))}">▣</button>` +
       `</span>`;
     const memeBtn = row.querySelector('.sl-meme-entry');
-    memeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openMemePage(s);
-    });
+    if (memeBtn) {
+      memeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openMemePage(s);
+      });
+    }
+    const travelBtn = row.querySelector('.sl-travel-entry');
+    if (travelBtn) {
+      travelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTravelPage(s);
+      });
+    }
     row.querySelector('.sl-action.pin').addEventListener('click', (e) => {
       e.stopPropagation();
       if (pinned) pinnedSessionIds = pinnedSessionIds.filter((id) => id !== key);
@@ -984,9 +1057,670 @@ async function openMemePage(session) {
   fitPopup(sesslist);
 }
 
+function travelBelongsToThisPet(trip) {
+  return !!trip && (AGENT === 'all' || AGENT === trip.agent);
+}
+
+function tokenRankText(rank, emptyKey = 'travel.rankEmpty') {
+  if (!rank || !rank.units) return t(emptyKey);
+  const parts = [];
+  if (rank.crown) parts.push(rank.crown > 3 ? `👑×${rank.crown}` : '👑'.repeat(rank.crown));
+  if (rank.sun) parts.push(rank.sun > 3 ? `☀️×${rank.sun}` : '☀️'.repeat(rank.sun));
+  if (rank.moon) parts.push('🌙'.repeat(rank.moon));
+  if (rank.star) parts.push('⭐'.repeat(rank.star));
+  // Keep the persisted property name `leaf` for compatibility, but render an
+  // amber paw instead of a green leaf.
+  if (rank.leaf) parts.push('🐾'.repeat(rank.leaf));
+  return parts.join(' ') || t(emptyKey);
+}
+
+function setTravelStatus(text, kind = '') {
+  slTravelStatus.textContent = text || '';
+  slTravelStatus.className = 'sl-travel-status' + (kind ? ' ' + kind : '');
+}
+
+function travelErrorText(code) {
+  if (code === 'busy') return t('travel.busy');
+  if (code === 'invalid-target' || code === 'foreign-target' || code === 'empty-mission') return t('travel.invalid');
+  return t('travel.notReady');
+}
+
+function travelMailboxSessions() {
+  return (curSessions || [])
+    .filter((session) => (
+      session &&
+      session.sessionRole === 'travel' &&
+      !session.headless &&
+      (AGENT === 'all' || session.travelAgent === AGENT || session.agent === AGENT)
+    ));
+}
+
+function renderTravelMailboxes() {
+  if (!slTravelMailboxes) return;
+  const sessions = travelMailboxSessions();
+  const agents = AGENT === 'all' ? ['claude', 'codex'] : [AGENT];
+  slTravelMailboxes.innerHTML = '';
+  for (const agent of agents) {
+    const session = sessions.find((item) => (item.travelAgent || item.agent) === agent) || null;
+    const hasLetter = !!(
+      session &&
+      session.choice &&
+      (session.state === 'waiting' || session.state === 'needsinput')
+    );
+    const active = travelData && travelData.active && travelData.active.agent === agent
+      ? travelData.active
+      : null;
+    let meta = t('travel.mailboxDormant');
+    if (hasLetter) meta = t('travel.mailboxWaiting');
+    else if (active) meta = active.status === 'departing'
+      ? t('travel.departing')
+      : t('travel.traveling', {
+        minutes: Math.max(0, Math.floor((Date.now() - Number(active.startedAt || Date.now())) / 60000)),
+      });
+    else if (session) {
+      if (session.badge === 'done') meta = t('sess.justDone');
+      else if (session.badge === 'interrupted') meta = t('sess.interrupted');
+      else meta = sessMeta(session.state) || session.state || t('travel.mailboxReady');
+    }
+
+    const row = document.createElement('div');
+    row.className = 'sl-travel-mailbox' + (hasLetter ? ' has-letter' : '') + (active ? ' active' : '');
+    row.innerHTML =
+      `<span class="sl-travel-mailbox-icon">${agent === 'codex' ? '🛰️' : '🐾'}</span>` +
+      `<div class="sl-travel-mailbox-main">` +
+      `<strong>${esc(t('travel.sessionName', { who: agent === 'codex' ? 'Codex' : 'Claude' }))}</strong>` +
+      `<span>${esc(meta)}</span></div>` +
+      (hasLetter
+        ? `<button class="sl-travel-letter-open">${esc(t('travel.replyLetter'))}</button>`
+        : session
+          ? `<button class="sl-travel-terminal-open">${esc(t('travel.openMailbox'))}</button>`
+          : `<span class="sl-travel-mailbox-new">${esc(t('travel.firstTripCreates'))}</span>`);
+    const letter = row.querySelector('.sl-travel-letter-open');
+    if (letter) {
+      letter.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const choice = session && session.choice;
+        if (!choice) return;
+        closeSessList();
+        enqueueChoice(choice);
+      });
+    }
+    const terminal = row.querySelector('.sl-travel-terminal-open');
+    if (terminal) {
+      terminal.addEventListener('click', (event) => {
+        event.stopPropagation();
+        window.pet.focusSession(session.sessionId || '');
+        closeSessList();
+      });
+    }
+    slTravelMailboxes.appendChild(row);
+  }
+}
+
+const POSTCARD_ART = {
+  mountain: [
+    '                 /\\',
+    '            /\\  /  \\   /\\',
+    '       /\\  /  \\/ /\\ \\_/  \\',
+    '      /  \\/    _/  \\_      \\',
+    '  ___/^^^  \\___/^^^^^^\\__/^^^\\___',
+    '     \\       /\\      /       /',
+    '      \\_____/  \\____/\\______/',
+    '          /\\      /\\      /\\',
+    '         /__\\    /__\\    /__\\',
+    '          ||      ||      ||',
+    '             /\\_/\\',
+    '            ( o.o )  *',
+    '             > ^ <  /|\\',
+  ],
+  desert: [
+    '         .       *       .',
+    '             \\   |   /',
+    '          ----  ( )  ----',
+    '             /   |   \\',
+    '       _..--\'\'       \'\'--.._',
+    '   _.-\'                     `-._',
+    '.-\'       _..---.._            `-.',
+    '      _.-\'   (   ) `-._',
+    '  _.-\'    (       )    `-._',
+    '            /\\_/\\',
+    '       _   ( o.o )   _',
+    '    .-\'     > ^ <     `-.',
+  ],
+  coast: [
+    '             |\\',
+    '             | \\',
+    '          ___|__\\___',
+    '         /    []    \\',
+    '        /_____[]_____\\',
+    '           |  ||',
+    '       ____|__||____       .',
+    '  ~~~~/            \\~~~~~~~~',
+    ' ~~~~~   /\\_/\\       ~~~~~~~~',
+    '  ~~~   ( o.o )  __/\\__  ~~~~',
+    '         > ^ <  /______\\',
+    ' ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
+  city: [
+    '       |[]|       .-.',
+    '   .---|[]|---.  |[]|   .----.',
+    '   |[] |  | []|  |  |   | [] |',
+    ' .-|[] |[]| []|--|[]|---| [] |-.',
+    ' | |   |  |   |  |  |   |    | |',
+    ' |_|___|__|___|__|__|___|____|_|',
+    '        \\   |   /',
+    '      ===\\==|==/===',
+    '          /\\_/\\',
+    '         ( o.o )',
+    '          > ^ <',
+  ],
+  forest: [
+    '       /\\        /\\       /\\',
+    '      /**\\   /\\ /**\\     /**\\',
+    '     /****\\ /**\\****\\ /\\****\\',
+    '       ||  /****\\ ||  /**\\ ||',
+    '   /\\  ||    ||   || /****\\||',
+    '  /**\\ ||    ||   ||   ||  ||',
+    ' /****\\||  .----. ||   ||  ||',
+    '   ||  || /      \\||   ||  ||',
+    '   ||    /\\_/\\    \\',
+    '        ( o.o )    |',
+    '         > ^ <    /',
+    '   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  ],
+  museum: [
+    '            /\\',
+    '           /  \\',
+    '      ____/____\\____',
+    '     /______________\\',
+    '       ||  ||  ||',
+    '       ||  ||  ||',
+    '       ||  ||  ||',
+    '    ___||__||__||___',
+    '   /________________\\',
+    '       /\\_/\\   []',
+    '      ( o.o ) /__\\',
+    '       > ^ <',
+  ],
+  craft: [
+    '      +-------------------+',
+    '      |# # # # # # # # # #|',
+    '      | # # # # # # # # # |',
+    '      |# # # # # # # # # #|',
+    '      +----+---------+----+',
+    '           |         |',
+    '        ___|_________|___',
+    '       /      /\\_/\\      \\',
+    '      |      ( o.o )      |',
+    '      |       > ^ <       |',
+    '       \\_________________/',
+  ],
+  generic: [
+    '          .-------------.',
+    '         /  .--.   *     \\',
+    '        /  /    \\    .    \\',
+    '       |  /  /\\  \\         |',
+    '       | /__/  \\__\\  /\\_/\\ |',
+    '       |             ( o.o )|',
+    '       |     .----.   > ^ < |',
+    '       |____/______\\_________|',
+    '          /  /  \\  \\',
+    '         /__/    \\__\\',
+    '       ~~~~~~~~~~~~~~~~~',
+  ],
+};
+
+const POSTCARD_ART_VARIANTS = {
+  desert: [
+    POSTCARD_ART.desert,
+    [
+      '          .--.       .--.',
+      '       .-(    ).   .(    )-.',
+      '      (___.__)__) (___.__)__)',
+      '          \\\\ | /     \\\\ | /',
+      '       _..-\\\\|/--..__\\\\|/--.._',
+      '   _.-\'      o       o       `-._',
+      '.-\'       o     o       o        `-.',
+      '       _..---.._   _..---.._',
+      '     .\'  /\\_/\\  `.\'         `.',
+      '    /   ( o.o )   \\\\   o      \\\\',
+      '   /     > ^ <     \\\\      o   \\\\',
+      '  `-----------------------------\'',
+    ],
+    [
+      '        _..---~~~~---.._',
+      '   _.-\'      .   .      `-._',
+      '.-\'_____( )_______( )_______`-.',
+      '          \\\\       /',
+      '           \\\\_.-._/',
+      '         .-\'  o o `-.',
+      '       _/  .-.___.-. \\\\_',
+      '      /___/  /   \\\\  \\\\___\\\\',
+      '         /__/     \\\\__\\\\',
+      '       /\\_/\\   _/\\_',
+      '      ( o.o ) /____\\\\',
+      '       > ^ <   ||||',
+    ],
+    [
+      '    Y   Y      Y       Y   Y',
+      '   \\\\|/ \\\\|/  .------.  \\\\|/ \\\\|/',
+      ' Y--*---*--/        \\\\--*---*--Y',
+      '   /|\\\\ /|\\\\|   .-.   |/|\\\\ /|\\\\',
+      '          |  (   )  |',
+      '   Y   Y  \\\\   `-\'  /  Y   Y',
+      '  \\\\|/ \\\\|/  `------\'  \\\\|/ \\\\|/',
+      '   *---*      /\\_/\\      *---*',
+      '  /|\\\\ /|\\\\    ( o.o )    /|\\\\ /|\\\\',
+      '              > ^ <',
+      '       _..--\'     `--.._',
+      '  _.-\'___________________`-._',
+    ],
+  ],
+};
+
+function postcardArtKey(words = '') {
+  const text = String(words || '').toLocaleLowerCase();
+  if (/(珠穆朗玛|珠峰|喜马拉雅|everest|himalaya|mountain|山峰|雪山|登山)/i.test(text)) {
+    return 'mountain';
+  }
+  if (/(纳米布|沙漠|沙丘|desert|dune|fairy circle|仙女圈|荒漠|白蚁|termite|linyji|皮尔巴拉|pilbara|spinifex|刺叶草)/i.test(text)) {
+    return 'desert';
+  }
+  if (/(海|岛|港|灯塔|coast|ocean|sea|island|harbour|harbor|lighthouse)/i.test(text)) {
+    return 'coast';
+  }
+  if (/(森林|树|生态|雨林|forest|woodland|jungle|tree)/i.test(text)) {
+    return 'forest';
+  }
+  if (/(博物馆|建筑|神殿|museum|gallery|temple|palace|遗址)/i.test(text)) {
+    return 'museum';
+  }
+  if (/(手艺|织|陶|工坊|craft|weav|potter|workshop|传统)/i.test(text)) {
+    return 'craft';
+  }
+  if (/(城市|小城|街|市场|city|town|street|market|社区)/i.test(text)) {
+    return 'city';
+  }
+  return '';
+}
+
+function mirrorPostcardArt(lines) {
+  const swap = { '/': '\\', '\\': '/', '(': ')', ')': '(', '<': '>', '>': '<', '[': ']', ']': '[' };
+  return lines.map((line) => [...line].reverse().map((char) => swap[char] || char).join(''));
+}
+
+function fallbackPostcardArt(trip, scene = '', index = 0) {
+  // A stop's own place name must win over broader trip context. Otherwise one
+  // Everest mention in a multi-stop trip turns every following card into a
+  // mountain postcard.
+  const tripWords = `${
+    trip && trip.project || ''
+  } ${
+    trip && trip.mission || ''
+  } ${
+    String(trip && trip.result || '').slice(0, 1600)
+  }`;
+  const key = postcardArtKey(scene) || postcardArtKey(tripWords) || 'generic';
+  const variantNumber = Math.abs(Number(index) || 0);
+  const variants = POSTCARD_ART_VARIANTS[key];
+  if (variants && variants.length) {
+    const lines = [...variants[variantNumber % variants.length]];
+    if (variantNumber >= variants.length && lines.length < 16) {
+      lines.unshift(variantNumber % 2 ? '      ·       *        .' : '   *        .       ·');
+    }
+    return lines.join('\n');
+  }
+  const base = POSTCARD_ART[key] || POSTCARD_ART.generic;
+  const lines = variantNumber % 2 ? mirrorPostcardArt(base) : [...base];
+  if (variantNumber >= 2 && lines.length < 16) {
+    lines.unshift(variantNumber % 3 === 2 ? '      .       *       .' : '   *       ·        .');
+  }
+  return lines.join('\n');
+}
+
+function usablePostcardArt(value) {
+  const lines = String(value || '').trim().split('\n');
+  if (lines.length < 8 || lines.length > 16) return false;
+  if (lines.some((line) => [...line].length > 48)) return false;
+  const ink = lines.join('').replace(/[\s\p{L}\p{N}]/gu, '');
+  return new Set(ink).size >= 5;
+}
+
+function postcardExcerpt(value) {
+  let source = String(value || '')
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/)?[^)]+\)/g, '$1')
+    .replace(/^#{1,4}\s+[^\n]+\n*/gm, '')
+    .replace(/\n(?:核实(?:于|日期)?|公开资料|参考资料|Sources?|References?|確認資料|出典)[:：]?[^\n]*[\s\S]*$/i, '')
+    .replace(/^[*-]\s+/gm, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const hanCount = (source.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || []).length;
+  const limit = hanCount > source.length * 0.18 ? 300 : 620;
+  if (source.length <= limit) return source;
+  const chunks = source.match(/[^。！？.!?\n]+[。！？.!?]?|\n+/g) || [source];
+  let result = '';
+  for (const chunk of chunks) {
+    const candidate = result + chunk;
+    if (candidate.length > limit - 2) break;
+    result = candidate;
+  }
+  if (!result.trim()) result = source.slice(0, limit - 2);
+  return `${result.trim()}…`;
+}
+
+function postcardStopFromBlock(block, trip, index, prefix = '') {
+  const source = String(block || '').replace(/<!--\s*LLMPET_STOP\s*-->/ig, '').trim();
+  const heading = /^\s*#{1,4}\s+([^\n]+)/m.exec(source);
+  const firstLine = String((source.split(/\n+/)[0] || '')).replace(/^#{1,4}\s*/, '').trim();
+  const title = (heading && heading[1] || firstLine || t('travel.stopN', { n: index + 1 }))
+    .replace(/\s+/g, ' ')
+    .slice(0, 54);
+  const fenced = /```(?:text|ascii(?:-art)?)?[ \t]*\n([\s\S]*?)```/i.exec(source);
+  const candidateArt = fenced ? String(fenced[1] || '').trim() : '';
+  let text = source;
+  if (fenced) text = `${text.slice(0, fenced.index)}${text.slice(fenced.index + fenced[0].length)}`;
+  if (heading) text = text.replace(heading[0], '');
+  text = `${prefix ? `${prefix.trim()}\n\n` : ''}${text.trim()}`.trim();
+  return {
+    title,
+    art: usablePostcardArt(candidateArt)
+      ? candidateArt
+      : fallbackPostcardArt(trip, `${title}\n${text}`, index),
+    text: postcardExcerpt(text),
+  };
+}
+
+function splitLegacyTravelStops(source) {
+  // Older travel replies were prose, so a stop marker can sit inside a
+  // sentence ("可第三站…", "去了第四站…") instead of at a paragraph start.
+  // New replies use LLMPET_STOP and never depend on this compatibility path.
+  const marker = /第(?:[一二三四五六七八九十百]+|\d+)站|Stop\s+\d+|第\d+停留地/gim;
+  const found = [];
+  let match;
+  while ((match = marker.exec(source))) {
+    found.push(match.index);
+  }
+  if (found.length < 2) return null;
+  return {
+    prefix: source.slice(0, found[0]).trim(),
+    blocks: found.map((start, index) => source.slice(start, found[index + 1] || source.length).trim()),
+  };
+}
+
+function splitTravelPostcard(trip) {
+  const source = String((trip && (trip.result || trip.error)) || '').trim();
+  const marked = source.split(/<!--\s*LLMPET_STOP\s*-->/i).slice(1).map((part) => part.trim()).filter(Boolean);
+  let stops;
+  if (marked.length) {
+    stops = marked.map((block, index) => postcardStopFromBlock(block, trip, index));
+  } else {
+    const legacy = splitLegacyTravelStops(source);
+    stops = legacy
+      ? legacy.blocks.map((block, index) => (
+      postcardStopFromBlock(block, trip, index, index === 0 ? legacy.prefix : '')
+      ))
+      : [postcardStopFromBlock(source, trip, 0)];
+  }
+  const seen = new Set();
+  return stops.map((stop, index) => {
+    let art = stop.art;
+    let signature = String(art || '').replace(/\s+/g, '');
+    if (!signature || seen.has(signature)) {
+      art = fallbackPostcardArt(trip, `${stop.title}\n${stop.text}`, index);
+      signature = String(art || '').replace(/\s+/g, '');
+    }
+    let alternate = index + 1;
+    while (seen.has(signature) && alternate < index + 7) {
+      art = fallbackPostcardArt(trip, `${stop.title}\n${stop.text}`, alternate++);
+      signature = String(art || '').replace(/\s+/g, '');
+    }
+    seen.add(signature);
+    return { ...stop, art };
+  });
+}
+
+function updateTravelStopNav(stops) {
+  const count = Array.isArray(stops) ? stops.length : 0;
+  selectedPostcardStop = Math.max(0, Math.min(selectedPostcardStop, Math.max(0, count - 1)));
+  slTravelStopPage.textContent = count
+    ? t('travel.stopPage', { current: selectedPostcardStop + 1, total: count })
+    : '';
+  slTravelStopPrev.disabled = selectedPostcardStop <= 0;
+  slTravelStopNext.disabled = selectedPostcardStop >= count - 1;
+}
+
+function goTravelStop(index) {
+  const cards = slTravelStopTrack ? [...slTravelStopTrack.children] : [];
+  if (!cards.length) return;
+  selectedPostcardStop = Math.max(0, Math.min(Number(index) || 0, cards.length - 1));
+  cards.forEach((card, cardIndex) => {
+    card.classList.toggle('active', cardIndex === selectedPostcardStop);
+    card.setAttribute('aria-hidden', cardIndex === selectedPostcardStop ? 'false' : 'true');
+  });
+  updateTravelStopNav(cards);
+}
+
+function renderTravelPostcard(trip) {
+  const source = String((trip && (trip.result || trip.error)) || '');
+  const key = `${trip && trip.id || ''}|${source.length}|${source.slice(0, 48)}`;
+  if (key === renderedPostcardKey && slTravelStopTrack.children.length) {
+    updateTravelStopNav([...slTravelStopTrack.children]);
+    return;
+  }
+  renderedPostcardKey = key;
+  const stops = splitTravelPostcard(trip);
+  slTravelStopTrack.innerHTML = '';
+  for (let index = 0; index < stops.length; index++) {
+    const stop = stops[index];
+    const card = document.createElement('article');
+    card.className = 'sl-travel-stop-card';
+    card.dataset.stop = String(index);
+    card.innerHTML =
+      `<div class="sl-travel-stop-title">${esc(stop.title)}</div>` +
+      `<div class="sl-travel-postcard-body">` +
+      `<pre class="sl-travel-postcard-art">${esc(stop.art)}</pre>` +
+      `<div class="sl-travel-postcard-text">${esc(stop.text)}</div>` +
+      `</div>`;
+    slTravelStopTrack.appendChild(card);
+  }
+  selectedPostcardStop = 0;
+  updateTravelStopNav(stops);
+  goTravelStop(0);
+}
+
+function selectedTravelPostcard() {
+  const all = Array.isArray(travelPostcards) ? travelPostcards : [];
+  if (!all.length) {
+    const latest = travelData && travelData.latest;
+    return latest && latest.status === 'completed' && latest.result ? latest : null;
+  }
+  return all.find((trip) => trip.id === selectedPostcardId) || all[0];
+}
+
+function renderTravelHistory() {
+  if (!slTravelHistory) return;
+  const all = Array.isArray(travelPostcards) ? travelPostcards : [];
+  slTravelHistory.innerHTML = '';
+  if (!all.length) {
+    const empty = document.createElement('div');
+    empty.className = 'sl-travel-history-empty';
+    empty.textContent = t('travel.noPostcard');
+    slTravelHistory.appendChild(empty);
+    return;
+  }
+  if (!selectedPostcardId || !all.some((trip) => trip.id === selectedPostcardId)) {
+    selectedPostcardId = all[0].id;
+  }
+  for (const trip of all) {
+    const card = document.createElement('button');
+    const statusKey = trip.status === 'completed'
+      ? 'travel.completed'
+      : trip.status === 'cancelled' ? 'travel.cancelled' : 'travel.failed';
+    card.className = 'sl-travel-history-card' + (trip.id === selectedPostcardId ? ' active' : '');
+    card.innerHTML =
+      `<span>${trip.agent === 'codex' ? '🛰️' : '🐾'}</span>` +
+      `<div><strong>${esc(trip.project || t('travel.postcard'))}</strong>` +
+      `<small>${esc(t(statusKey))} · ${esc(compactTokens(trip.usage && trip.usage.tokens || 0))} token</small></div>`;
+    card.addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectedPostcardId = trip.id;
+      selectedPostcardStop = 0;
+      renderedPostcardKey = '';
+      renderTravelPage();
+    });
+    slTravelHistory.appendChild(card);
+  }
+}
+
+function renderTravelTemplates() {
+  const available = (travelData && travelData.templates) || [];
+  if (!available.length) return;
+  if (!travelTemplateId || !available.some((item) => item.id === travelTemplateId)) {
+    travelTemplateId = available[0].id;
+  }
+  slTravelTemplates.innerHTML = '';
+  for (const item of available) {
+    const card = document.createElement('button');
+    card.className = 'sl-travel-template' + (item.id === travelTemplateId ? ' active' : '');
+    card.innerHTML = `<strong>${esc(item.label)}</strong><span>${esc(item.description)}</span>`;
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      travelTemplateId = item.id;
+      travelMissionDirty = false;
+      slTravelMission.value = item.mission || '';
+      renderTravelTemplates();
+    });
+    slTravelTemplates.appendChild(card);
+  }
+  if (!travelMissionDirty && !slTravelMission.value) {
+    const selected = available.find((item) => item.id === travelTemplateId) || available[0];
+    slTravelMission.value = selected.mission || '';
+  }
+}
+
+function renderTravelPage() {
+  if (!slTravelView || slTravelView.classList.contains('hidden')) return;
+  const data = travelData || { growth: {}, templates: [] };
+  const growth = data.growth || {};
+  const rank = growth.rank || {};
+  const active = data.active || null;
+  const shownTarget = active || travelTarget;
+
+  slTravelSession.textContent = shownTarget
+    ? `${shownTarget.agent === 'codex' ? 'Codex' : 'Claude'} · ${shownTarget.project || ''}`
+    : t('travel.inboxIntro');
+  slTravelRankIcons.textContent = tokenRankText(rank);
+  const remaining = Math.max(0, (Number(rank.nextTokens) || 10000) - (Number(rank.progressTokens) || 0));
+  slTravelRankMeta.textContent =
+    t('travel.rankTokens', { tokens: compactTokens(growth.totalTokens || 0), trips: growth.completed || 0 }) +
+    '\n' + t('travel.nextRank', { tokens: compactTokens(remaining) });
+
+  const machine = (lastStats && lastStats.machineGrowth) || {};
+  const machineRank = machine.rank || {};
+  const machineRemaining = Math.max(
+    0,
+    (Number(machineRank.nextTokens) || 10000000) - (Number(machineRank.progressTokens) || 0),
+  );
+  slMachineRankIcons.textContent = tokenRankText(machineRank, 'travel.machineRankEmpty');
+  slMachineRankMeta.textContent =
+    t('travel.machineRankTokens', {
+      tokens: compactTokens(machine.totalTokens || 0),
+      claude: compactTokens(machine.claudeTokens || 0),
+      codex: compactTokens(machine.codexTokens || 0),
+    }) +
+    '\n' + t('travel.nextMachineRank', { tokens: compactTokens(machineRemaining) });
+
+  renderTravelMailboxes();
+  if (slWander) {
+    slWander.disabled = !!active;
+    slWander.title = active ? t('travel.busy') : t('travel.wanderTitle');
+  }
+
+  if (active) {
+    slTravelSetup.classList.add('hidden');
+    slTravelActive.classList.remove('hidden');
+    const minutes = Math.max(0, Math.floor((Date.now() - Number(active.startedAt || Date.now())) / 60000));
+    slTravelActiveStatus.textContent = active.status === 'departing'
+      ? t('travel.departing')
+      : t('travel.traveling', { minutes });
+    slTravelActiveMission.textContent = active.mission || '';
+    slTravelCancel.classList.toggle('hidden', !travelBelongsToThisPet(active));
+    setTravelStatus(travelBelongsToThisPet(active) ? '' : t('travel.busy'));
+  } else if (travelTarget) {
+    slTravelSetup.classList.remove('hidden');
+    slTravelActive.classList.add('hidden');
+    renderTravelTemplates();
+  } else {
+    slTravelSetup.classList.add('hidden');
+    slTravelActive.classList.add('hidden');
+  }
+
+  renderTravelHistory();
+  const latest = selectedTravelPostcard();
+  if (latest && latest.status === 'completed' && latest.result) {
+    slTravelPostcard.classList.remove('hidden');
+    slTravelPostcardMeta.textContent =
+      `${t('travel.completed')} · ${compactTokens(latest.usage && latest.usage.tokens || 0)} token`;
+    renderTravelPostcard(latest);
+  } else {
+    slTravelPostcard.classList.add('hidden');
+    renderedPostcardKey = '';
+    if (slTravelStopTrack) slTravelStopTrack.innerHTML = '';
+  }
+  fitPopup(sesslist);
+}
+
+async function openTravelPage(session) {
+  travelTarget = session || null;
+  travelMissionDirty = false;
+  travelTemplateId = null;
+  slSessionView.classList.add('hidden');
+  slMemeView.classList.add('hidden');
+  slTravelView.classList.remove('hidden');
+  slBack.classList.remove('hidden');
+  slTitle.textContent = session ? t('travel.pickTitle') : t('travel.inboxTitle');
+  slSub.textContent = '';
+  slTravelMission.value = '';
+  setTravelStatus('');
+  try {
+    const loaded = await Promise.all([
+      window.pet.getTravel(),
+      typeof window.pet.getTravelPostcards === 'function'
+        ? window.pet.getTravelPostcards()
+        : Promise.resolve([]),
+    ]);
+    travelData = loaded[0];
+    travelPostcards = Array.isArray(loaded[1]) ? loaded[1] : [];
+    if (
+      !travelPostcards.length &&
+      travelData &&
+      travelData.latest &&
+      travelData.latest.status === 'completed' &&
+      travelData.latest.result
+    ) {
+      travelPostcards = [travelData.latest];
+    }
+    selectedPostcardId = travelPostcards[0] ? travelPostcards[0].id : null;
+    selectedPostcardStop = 0;
+    renderedPostcardKey = '';
+  } catch {
+    travelData = null;
+    travelPostcards = [];
+    setTravelStatus(t('travel.notReady'), 'error');
+  }
+  renderTravelPage();
+}
+
+function openTravelInbox() {
+  return openTravelPage(null);
+}
+
 function showSessionPage() {
   memeTarget = null;
+  travelTarget = null;
   slMemeView.classList.add('hidden');
+  slTravelView.classList.add('hidden');
   slSessionView.classList.remove('hidden');
   slBack.classList.add('hidden');
   slTitle.textContent = t('sess.title');
@@ -1009,6 +1743,7 @@ function closeSessList() {
   sesslist.classList.add('hidden');
   sessListOpen = false;
   memeTarget = null;
+  travelTarget = null;
   rlog('sesslist', 'close');
   resetPetSize();
 }
@@ -1365,6 +2100,43 @@ scheduleIdleAction();
 
 const curSkinEl = () => (skin === 'pixel' ? pixel : skin === 'cat' ? cat : mascot);
 
+window.pet.onTravel((event) => {
+  if (!event) return;
+  if (event.state) travelData = event.state;
+  if (
+    event.trip &&
+    event.type === 'completed' &&
+    event.trip.status === 'completed' &&
+    event.trip.result
+  ) {
+    travelPostcards = [
+      event.trip,
+      ...travelPostcards.filter((trip) => trip && trip.id !== event.trip.id),
+    ];
+    selectedPostcardId = event.trip.id;
+    selectedPostcardStop = 0;
+    renderedPostcardKey = '';
+  }
+  if (sessListOpen && !slTravelView.classList.contains('hidden')) renderTravelPage();
+  const trip = event.trip;
+  if (!travelBelongsToThisPet(trip)) return;
+  if (event.type === 'started') {
+    clearTransient();
+    setState('roam');
+    showBubble(t(trip.mode === 'wander' ? 'travel.bubWanderStart' : 'travel.bubStart'), 3600, true);
+  } else if (event.type === 'completed') {
+    transient('happy', 2600, t('travel.bubDone'), 4200);
+    confetti();
+    SOUND.bigDone();
+  } else if (event.type === 'cancelled') {
+    showBubble(t('travel.bubCancel'), 3000, true);
+    if (lastStats) applyStats(lastStats);
+  } else if (event.type === 'failed') {
+    transient('error', 2800, t('travel.bubFailed'), 4200);
+    SOUND.error();
+  }
+});
+
 // ---------- 事件 ----------
 window.pet.onEvent((ev) => {
   // 你正在答面板/打字时：新的待答任务只悄悄进队列(不抢面板)，其余动画/彩带/气泡/状态变化一律不打断
@@ -1372,6 +2144,12 @@ window.pet.onEvent((ev) => {
     if ((ev.kind === 'waiting' || ev.kind === 'needsinput') && ev.choice) enqueueChoice(ev.choice);
     return;
   }
+  // 旅行中的宠物不被其它普通 session 的动画瞬间拉回工位；真正需要用户
+  // 处理的 waiting / needsinput / error 仍会通过快照优先级接管。
+  if (
+    travelBelongsToThisPet(travelData && travelData.active) &&
+    ['operation', 'say', 'user-turn', 'turn-done', 'big-done', 'greet', 'longcmd'].includes(ev.kind)
+  ) return;
   // 表情包刚下发时，紧随其后的 user-turn / operation 正是这条 Prompt 自己
   // 产生的。不能让它们在几十毫秒内把配置好的「汗流浃背」应对盖成 thinking /
   // working；错误、授权和需回复等高优先级事件仍继续穿透并接管。
@@ -1537,6 +2315,7 @@ let lastStats = null; // 最近一次快照：transient 到期时用它立即重
 let sayToken = 0;     // say 接棒 happy 的排队令牌（新事件作废旧排队）
 function compactTokens(value) {
   const n = Number(value) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
   return String(Math.round(n));
@@ -1544,6 +2323,7 @@ function compactTokens(value) {
 function applyStats(s) {
   if (!s) return;
   lastStats = s;
+  if (s.travel) travelData = s.travel;
   if (AGENT === 'codex') {
     // Codex 没有逐 token 价目，额度条显示套餐窗口用量（5h 主窗口 + 周窗口）
     const rl = s.codexLimits;
@@ -1565,7 +2345,10 @@ function applyStats(s) {
   if (radialOpen) updateRadialBadge();
   renderSessions(s.sessions || []);
   updateNotepad(s); // 记事本：行动清单 + 待办
-  if (sessListOpen) { renderSessList(); fitPopup(sesslist); } // HUD 开着时随快照刷新并重定高
+  if (sessListOpen) {
+    if (!slTravelView.classList.contains('hidden')) renderTravelPage();
+    else { renderSessList(); fitPopup(sesslist); }
+  } // HUD 开着时随快照刷新并重定高
 
   // 选项面板：按快照重建队列（多任务都在、标明项目；防漏事件/启动时已在等待）
   refreshAsk(s);
@@ -1587,6 +2370,8 @@ function applyStats(s) {
     setState('error'); // 有会话卡在 API 错误 → 瘫倒，直到该会话恢复或 oneshot 衰减
   } else if (s.needsinputCount > 0) {
     setState('needsinput');
+  } else if (travelBelongsToThisPet(travelData && travelData.active)) {
+    setState('roam');
   } else if (s.sweepingCount > 0) {
     setState('sweeping');
   } else if (s.jugglingCount > 0) {
@@ -1757,6 +2542,53 @@ document.getElementById('tp-close').addEventListener('click', (e) => { e.stopPro
 
 // 会话列表 HUD：关闭 + 底部操作（新开按钮按本窗口的 agent 分流）
 document.getElementById('sl-close').addEventListener('click', (e) => { e.stopPropagation(); closeSessList(); });
+slTravelMission.addEventListener('input', () => { travelMissionDirty = true; });
+slTravelMission.addEventListener('focus', () => window.pet.focusPet());
+slTravelMission.addEventListener('blur', () => window.pet.blurPet());
+slTravelStart.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!travelTarget) {
+    setTravelStatus(t('travel.invalid'), 'error');
+    return;
+  }
+  const mission = String(slTravelMission.value || '').trim();
+  if (!mission) {
+    setTravelStatus(t('travel.invalid'), 'error');
+    slTravelMission.focus();
+    return;
+  }
+  slTravelStart.disabled = true;
+  setTravelStatus(t('travel.departing'));
+  let result;
+  try {
+    result = await window.pet.startTravel(travelTarget.sessionId || '', travelTemplateId || '', mission);
+  } catch {
+    result = { ok: false, code: 'not-ready' };
+  }
+  slTravelStart.disabled = false;
+  if (result && result.state) travelData = result.state;
+  if (!result || !result.ok) setTravelStatus(travelErrorText(result && result.code), 'error');
+  else setTravelStatus('');
+  renderTravelPage();
+});
+slTravelCancel.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  slTravelCancel.disabled = true;
+  let result;
+  try { result = await window.pet.cancelTravel(); } catch { result = { ok: false, code: 'not-ready' }; }
+  slTravelCancel.disabled = false;
+  if (result && result.state) travelData = result.state;
+  if (!result || !result.ok) setTravelStatus(travelErrorText(result && result.code), 'error');
+  renderTravelPage();
+});
+slTravelStopPrev.addEventListener('click', (e) => {
+  e.stopPropagation();
+  goTravelStop(selectedPostcardStop - 1);
+});
+slTravelStopNext.addEventListener('click', (e) => {
+  e.stopPropagation();
+  goTravelStop(selectedPostcardStop + 1);
+});
 slBack.addEventListener('click', (e) => { e.stopPropagation(); showSessionPage(); });
 slSearch.addEventListener('input', () => {
   sessionSearch = slSearch.value || '';
@@ -1785,6 +2617,26 @@ const slNewCodexBtn = document.getElementById('sl-new-codex');
 // every language switch, so the Codex pet keeps its own label.
 if (AGENT === 'codex') slNewBtn.dataset.i18n = 'sess.newCodex';
 else if (AGENT === 'all' && slNewCodexBtn) slNewCodexBtn.classList.remove('hidden'); // 单宠双后端：两个都能开
+if (slTravelInbox) slTravelInbox.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  await openTravelInbox();
+});
+if (slWander) slWander.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  slWander.disabled = true;
+  slWander.textContent = t('travel.wanderDeparting');
+  let result;
+  try { result = await window.pet.wanderTravel(); } catch { result = { ok: false, code: 'not-ready' }; }
+  if (result && result.state) travelData = result.state;
+  slWander.textContent = t('travel.wanderEntry');
+  if (result && result.ok) {
+    closeSessList();
+    return;
+  }
+  slWander.disabled = !!(travelData && travelData.active);
+  slSub.textContent = travelErrorText(result && result.code);
+  fitPopup(sesslist);
+});
 slNewBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   if (AGENT === 'codex') window.pet.launchCodex(); else window.pet.launchClaude();

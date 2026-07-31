@@ -1,12 +1,14 @@
 'use strict';
 
-// Open a new OS terminal running the `claude` CLI (original implementation).
+// Open a new OS terminal running a supported CLI.
 //
 // The pet's left-click / tray "唤起 Claude" starts a fresh session. We locate
 // the claude binary (Claude Code runs us with a normal PATH here, but we also
 // probe common install dirs), then hand a terminal a command string to run.
+// Long prompts are passed through a private file instead of being embedded in
+// AppleScript / launcher arguments, whose command length is platform-limited.
 
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -51,6 +53,21 @@ function findClaude() { return findCli('claude'); }
 
 const posixQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const appleEscape = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+function posixInvocation(cli, cliArgs, promptFile) {
+  const parts = [posixQuote(cli), ...cliArgs.map(posixQuote)];
+  if (promptFile) parts.push(`"$(/bin/cat ${posixQuote(promptFile)})"`);
+  return parts.join(' ');
+}
+
+function powershellInvocation(cli, cliArgs, promptFile) {
+  const parts = [`& ${psQuote(cli)}`, ...cliArgs.map(psQuote)];
+  if (promptFile) {
+    return `$prompt = Get-Content -Raw -LiteralPath ${psQuote(promptFile)}; ${parts.join(' ')} $prompt`;
+  }
+  return parts.join(' ');
+}
 
 function trySpawn(bin, args, opts) {
   return new Promise((resolve) => {
@@ -64,34 +81,227 @@ function trySpawn(bin, args, opts) {
   });
 }
 
+// A GUI terminal launched from `npm start` can inherit an already-active
+// Conda environment from Electron. Its interactive shell then runs `conda
+// init` again; Conda 25.5.x may crash while trying to reactivate the same
+// prefix. Let the terminal's own shell initialize Conda exactly once.
+function cleanTerminalLaunchEnv(source = process.env) {
+  const env = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CONDA_') || key === '_CE_CONDA' || key === '_CE_M') {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 // candidates: ordered [bin, args] terminal launchers for this platform.
-function buildCandidates(cli, workDir) {
+function buildCandidates(
+  cli,
+  workDir,
+  cliArgs = [],
+  promptFile = null,
+  keepOpen = false,
+  terminalTitle = '',
+) {
   const plat = process.platform;
   if (plat === 'darwin') {
-    const script = `tell application "Terminal" to do script "cd ${appleEscape(posixQuote(workDir))} && ${appleEscape(cli)}"`;
+    // Keep the AppleScript payload short. Embedding a large base64 prompt here
+    // is still subject to AppleScript/Terminal command truncation.
+    const command = posixInvocation(cli, cliArgs, promptFile);
+    const shell = process.env.SHELL || '/bin/zsh';
+    const run = keepOpen
+      ? `${command}; exec ${posixQuote(shell)} -l`
+      : `exec ${command}`;
+    const title = cleanTerminalTitle(terminalTitle);
+    const script = title
+      ? `tell application "Terminal"
+set llmpetTab to do script "cd ${appleEscape(posixQuote(workDir))} && ${appleEscape(run)}"
+set custom title of llmpetTab to "${appleEscape(title)}"
+set title displays custom title of llmpetTab to true
+activate
+end tell`
+      : `tell application "Terminal"
+activate
+do script "cd ${appleEscape(posixQuote(workDir))} && ${appleEscape(run)}"
+end tell`;
     return [['osascript', ['-e', script]]];
   }
   if (plat === 'win32') {
+    if (promptFile) {
+      const command = powershellInvocation(cli, cliArgs, promptFile);
+      return [
+        ['wt.exe', ['-d', workDir, '--', 'powershell.exe', '-NoExit', '-NoProfile', '-Command', command]],
+        ['powershell.exe', ['-NoExit', '-NoProfile', '-Command', `Set-Location -LiteralPath ${psQuote(workDir)}; ${command}`]],
+      ];
+    }
+    const argList = cliArgs.map(psQuote).join(',');
+    const script = `Start-Process -FilePath ${psQuote(cli)} -ArgumentList @(${argList}) -WorkingDirectory ${psQuote(workDir)}`;
     return [
-      ['wt.exe', ['--', 'cmd.exe', '/k', `cd /d "${workDir}" && "${cli}"`]],
-      ['cmd.exe', ['/c', 'start', '', 'cmd.exe', '/k', `cd /d "${workDir}" && "${cli}"`]],
+      ['wt.exe', ['-d', workDir, '--', cli, ...cliArgs]],
+      ['powershell.exe', ['-NoProfile', '-Command', script]],
     ];
   }
-  const run = `cd ${posixQuote(workDir)}; ${posixQuote(cli)}; exec ${process.env.SHELL || 'bash'}`;
+  if (promptFile) {
+    const invocation = posixInvocation(cli, cliArgs, promptFile);
+    const shell = process.env.SHELL || '/bin/sh';
+    const command = keepOpen
+      ? `cd ${posixQuote(workDir)} && ${invocation}; exec ${posixQuote(shell)} -l`
+      : `cd ${posixQuote(workDir)} && exec ${invocation}`;
+    return [
+      ['x-terminal-emulator', ['-e', '/bin/sh', '-lc', command]],
+      ['gnome-terminal', ['--', '/bin/sh', '-lc', command]],
+      ['konsole', ['-e', '/bin/sh', '-lc', command]],
+      ['xterm', ['-e', '/bin/sh', '-lc', command]],
+    ];
+  }
   return [
-    ['x-terminal-emulator', ['-e', `bash -lc ${posixQuote(run)}`]],
-    ['gnome-terminal', ['--', 'bash', '-lc', run]],
-    ['konsole', ['-e', `bash -lc ${posixQuote(run)}`]],
-    ['xterm', ['-e', `bash -lc ${posixQuote(run)}`]],
+    ['x-terminal-emulator', ['-e', cli, ...cliArgs]],
+    ['gnome-terminal', ['--', cli, ...cliArgs]],
+    ['konsole', ['-e', cli, ...cliArgs]],
+    ['xterm', ['-e', cli, ...cliArgs]],
   ];
+}
+
+function cleanTerminalTitle(value) {
+  return String(value || '').replace(/[\r\n\u0000]/g, '').trim().slice(0, 80);
+}
+
+function closeMacTerminalScript(terminalTitle) {
+  const title = cleanTerminalTitle(terminalTitle);
+  if (!title) return '';
+  return `tell application "Terminal"
+set llmpetClosed to 0
+set llmpetBusy to 0
+repeat with llmpetIndex from (count of windows) to 1 by -1
+set llmpetWindow to window llmpetIndex
+repeat with llmpetTab in tabs of llmpetWindow
+if custom title of llmpetTab is "${appleEscape(title)}" then
+if busy of llmpetTab then
+set llmpetBusy to llmpetBusy + 1
+else
+close llmpetWindow
+set llmpetClosed to llmpetClosed + 1
+end if
+exit repeat
+end if
+end repeat
+end repeat
+if llmpetBusy > 0 then return "busy:" & llmpetBusy & ":" & llmpetClosed
+if llmpetClosed > 0 then return "closed:" & llmpetClosed
+return "missing"
+end tell`;
+}
+
+function travelCliPids(output, agent, providerSessionId) {
+  const target = agent === 'codex' ? 'codex' : agent === 'claude' ? 'claude' : '';
+  const sessionId = String(providerSessionId || '').trim();
+  if (!target || !sessionId) return [];
+  const fingerprint = target === 'codex'
+    ? /(?:^|\s)(?:\S*\/)?codex(?:\s|$)/i
+    : /(?:^|\s)(?:\S*\/)?claude(?:\s|$)|claude-code|@anthropic-ai/i;
+  const seen = new Set();
+  const result = [];
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+([\s\S]+)$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const command = match[2];
+    const executable = command.trim().split(/\s+/)[0] || '';
+    if (
+      !Number.isInteger(pid) ||
+      pid <= 1 ||
+      pid === process.pid ||
+      /\.app\//i.test(executable) ||
+      !fingerprint.test(command) ||
+      !command.split(/\s+/).includes(sessionId) ||
+      seen.has(pid)
+    ) continue;
+    seen.add(pid);
+    result.push(pid);
+  }
+  return result;
+}
+
+function terminateTravelCliProcesses(opts = {}) {
+  const agent = opts.agent === 'codex' ? 'codex' : opts.agent === 'claude' ? 'claude' : '';
+  const providerSessionId = String(opts.providerSessionId || '').trim();
+  if (!agent || !providerSessionId) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    execFile('ps', ['-ax', '-o', 'pid=,command='], { encoding: 'utf8', timeout: 3000 }, (error, stdout) => {
+      if (error) {
+        resolve([]);
+        return;
+      }
+      const pids = travelCliPids(stdout, agent, providerSessionId);
+      for (const pid of pids) {
+        try { process.kill(pid, 'SIGTERM'); } catch {}
+      }
+      resolve(pids);
+    });
+  });
+}
+
+function closeCliTerminal(opts = {}) {
+  if (process.platform !== 'darwin') return Promise.resolve({ ok: true, status: 'unsupported' });
+  const terminalTitle = cleanTerminalTitle(opts.terminalTitle);
+  if (!terminalTitle) return Promise.resolve({ ok: true, status: 'untitled' });
+  const processPid = Number(opts.processPid);
+  if (Number.isInteger(processPid) && processPid > 1 && processPid !== process.pid) {
+    try { process.kill(processPid, 'SIGTERM'); } catch {}
+  }
+  const script = closeMacTerminalScript(terminalTitle);
+  const attempts = Number.isInteger(opts.attempts) ? Math.max(1, opts.attempts) : 6;
+  const intervalMs = Number.isFinite(opts.intervalMs) ? Math.max(25, opts.intervalMs) : 400;
+
+  return terminateTravelCliProcesses(opts).then((terminatedPids) => new Promise((resolve) => {
+    const attempt = (remaining) => {
+      execFile('osascript', ['-e', script], { encoding: 'utf8', timeout: 3000 }, (error, stdout) => {
+        const status = String(stdout || '').trim();
+        if (!error && !status.startsWith('busy')) {
+          resolve({ ok: true, status: status || 'missing', terminatedPids });
+          return;
+        }
+        if (remaining <= 1) {
+          resolve({
+            ok: false,
+            status: status || 'busy',
+            terminatedPids,
+            message: error && error.message || '',
+          });
+          return;
+        }
+        setTimeout(() => attempt(remaining - 1), intervalMs).unref?.();
+      });
+    };
+    setTimeout(() => attempt(attempts), intervalMs).unref?.();
+  }));
 }
 
 async function launchCli(name, opts = {}) {
   const cli = findCli(name);
   const workDir = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : os.homedir();
-  for (const [bin, args] of buildCandidates(cli, workDir)) {
+  const cliArgs = Array.isArray(opts.args) ? opts.args.map((arg) => String(arg)) : [];
+  const requestedPromptFile = typeof opts.promptFile === 'string' ? opts.promptFile : '';
+  if (requestedPromptFile && !fs.existsSync(requestedPromptFile)) {
+    return { ok: false, message: 'prompt file does not exist' };
+  }
+  const promptFile = requestedPromptFile || null;
+  const keepOpen = opts.keepOpen === true;
+  const terminalTitle = cleanTerminalTitle(opts.terminalTitle);
+  const launchEnv = cleanTerminalLaunchEnv();
+  for (const [bin, args] of buildCandidates(
+    cli,
+    workDir,
+    cliArgs,
+    promptFile,
+    keepOpen,
+    terminalTitle,
+  )) {
     // eslint-disable-next-line no-await-in-loop
-    if (await trySpawn(bin, args, { cwd: workDir })) return { ok: true, terminal: bin };
+    if (await trySpawn(bin, args, { cwd: workDir, env: launchEnv })) {
+      return { ok: true, terminal: bin };
+    }
   }
   return { ok: false, message: 'could not open a terminal' };
 }
@@ -99,4 +309,15 @@ async function launchCli(name, opts = {}) {
 const launchClaude = (opts = {}) => launchCli('claude', opts);
 const launchCodex = (opts = {}) => launchCli('codex', opts);
 
-module.exports = { launchClaude, launchCodex, launchCli, findClaude, findCli };
+module.exports = {
+  launchClaude,
+  launchCodex,
+  launchCli,
+  closeCliTerminal,
+  closeMacTerminalScript,
+  travelCliPids,
+  findClaude,
+  findCli,
+  buildCandidates,
+  cleanTerminalLaunchEnv,
+};

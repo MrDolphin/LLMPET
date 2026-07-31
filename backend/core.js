@@ -139,6 +139,8 @@ function createCore(options = {}) {
     setField(s, 'ghosttyTerminalId', f.ghosttyTerminalId);
     setField(s, 'originator', f.originator);
     setField(s, 'model', f.model);
+    setField(s, 'sessionRole', f.sessionRole);
+    setField(s, 'travelAgent', f.travelAgent);
     if (typeof f.headless === 'boolean') s.headless = f.headless;
     if (f.sessionTitle != null) s.sessionTitle = f.sessionTitle;
     if (f.contextUsage) s.contextUsage = f.contextUsage;
@@ -281,6 +283,8 @@ function createCore(options = {}) {
       headless: !!s.headless,
       sessionTitle: s.sessionTitle || null,
       model: s.model || null,
+      sessionRole: s.sessionRole || null,
+      travelAgent: s.travelAgent || null,
       contextUsage: s.contextUsage || null,
       assistantLastOutput: typeof s.assistantLastOutput === 'string' ? s.assistantLastOutput : null,
       assistantLastOutputTruncated: !!s.assistantLastOutputTruncated,
@@ -426,6 +430,10 @@ function createCore(options = {}) {
     for (const [id, s] of sessions) {
       const idle = now - (s.updatedAt || now);
       const alive = s.sourcePid ? pidAlive(s.sourcePid) : null;
+      // Claude and Codex each own one durable LLMPET travel conversation.
+      // Its terminal is intentionally closed between outings, but the mailbox
+      // remains a first-class pet card and is resumed on the next departure.
+      const durableTravelSession = s.sessionRole === 'travel';
 
       // Oneshot decay backstop: error/attention/sweeping/carrying settle to idle
       // after their TTL if no further event arrives (StopFailure / /clear paths).
@@ -434,15 +442,15 @@ function createCore(options = {}) {
 
       // Ended session (SessionEnd → sleeping / clear → sweeping): retire after a while.
       if (s.state === 'sleeping' || s.ended) {
-        if (idle > SESSION_STALE_MS) { sessions.delete(id); changed = true; }
+        if (!durableTravelSession && idle > SESSION_STALE_MS) { sessions.delete(id); changed = true; }
         if (s.state === 'sleeping') continue;
       }
       // Terminal process is gone → remove after a short grace.
-      if (alive === false && idle > DETACHED_REMOVE_MS) {
+      if (!durableTravelSession && alive === false && idle > DETACHED_REMOVE_MS) {
         sessions.delete(id); changed = true; continue;
       }
       // No terminal info at all + silent very long → remove.
-      if (alive === null && idle > SESSION_STALE_MS) {
+      if (!durableTravelSession && alive === null && idle > SESSION_STALE_MS) {
         sessions.delete(id); changed = true; continue;
       }
       // Stuck working/thinking → settle to idle, but KEEP it visible.

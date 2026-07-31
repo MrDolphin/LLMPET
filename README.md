@@ -31,7 +31,7 @@
 | <img src="assets/cat/cat-error.gif" width="72" alt="出错"> | 💥 **error 出错** | 执行失败 / API 报错（抱头崩溃大叫） |
 | <img src="assets/cat/cat-loafing.gif" width="72" alt="摸鱼"> <img src="assets/cat/cat-loafing-2.gif" width="72" alt="摸鱼2"> <img src="assets/cat/cat-loafing-3.gif" width="72" alt="摸鱼3"> | 🍦 **loafing 摸鱼** | 上一步干完、下一步还没来的间隙——摸鱼轮换：躺地刷手机 / 点外卖 / 奶瓶手机 |
 | <img src="assets/cat/cat-idle.gif" width="72" alt="待命"> | 🪑 **idle 待命** | 没有任务（转椅上冰淇淋+手机摸鱼） |
-| <img src="assets/cat/cat-roam.gif" width="72" alt="闲逛"> | 🚶 **roam 闲逛** | 长时间空闲（撒腿跑着玩） |
+| <img src="assets/cat/cat-roam.gif" width="72" alt="旅行"> | 🧳 **roam 旅行** | 青蛙旅行正在进行：独立 agent 只读探索项目（撒腿跑着玩） |
 | <img src="assets/cat/cat-sleeping.gif" width="72" alt="睡觉"> <img src="assets/cat/cat-sleeping-2.gif" width="72" alt="睡觉2"> | 😴 **sleeping 睡觉** | 会话结束 / 久无活动——睡姿轮换：被窝一坨 / 拔肚子毛当眼罩 |
 
 ---
@@ -77,6 +77,16 @@ Codex CLI / Desktop ──写 rollout──► ~/.codex/sessions/YYYY/MM/DD/*.js
   - **双宠**：Claude / Codex 各一只，形象、位置独立可拖，各自戴名牌，事件各归各的宠。
 - `LLMPET_NO_CODEX=1` 关闭 Codex 监听；`LLMPET_CODEX_DIR=<dir>` 指向假目录做开发验证。
 
+### 🧳 青蛙旅行（只读探索）
+
+在会话列表点该会话右侧的 **🧳**，可让对应的 Claude Code / Codex 独自出去探索。它使用该会话的项目目录，但不会续写或污染原会话；可选择「项目侦察」「捉虫寻迹」「灵感散步」，也能写自定义任务。
+
+- 会话面板底部另有 **🐱 闲逛**：不绑定任何 session、不读取任何项目，也不要求用户输入。它会随机选择「远方开窗」「人间奇技」「地球怪角落」等真实世界路线，打开用户可见的 Claude / Codex CLI，至少走完三站后带回新见闻。
+- 闲逛只开放公开网页搜索和读取，不开放文件、Shell、登录、表单或上传能力。如果对应 CLI 弹出原生网页访问授权，可由用户在可见终端里亲自允许或拒绝；拒绝不会被绕过，也不会继续索要更大权限。每趟从 `~/.octopus/wander-home/trips/` 下自己的足迹目录出发；旅行小屋和结构化日志一直保留，最近走过的路线和记忆会用于减少重复。
+- 同一时间只允许一趟旅行，可随时取消；最长 30 分钟，结束后带回一张本地明信片。
+- 每次调用的真实 token 会单独累计：每 10,000 token 获得一片叶子，4 叶 = 1 星、4 星 = 1 月、4 月 = 1 日。
+- 旅行记录和成长值保存在权限为 `0600` 的 `~/.octopus/travel.json`。只有你主动点击「出发」时，任务和项目上下文才会由对应 CLI 发给 Claude 或 OpenAI；LLMPET 不会自动发起旅行。
+
 ---
 
 ## 从源码安装与运行
@@ -107,6 +117,8 @@ npm start            # 启动桌宠（首次启动会注册 Claude Code 钩子�
 
 - 首次启动会把钩子写进 `~/.claude/settings.json`（合并、可逆）。之后新开的 `claude` 会话即被桌宠感知。
 - **左键点桌宠** = 弹出**会话列表**（状态 + 会话名 + 上下文用量%）；可搜索、按 Claude / Codex / 待处理筛选、置顶或归档，点某行把对应终端 / 客户端调到前台。偏好写入 `~/.octopus/config.json`。
+- 会话右侧的 **🧳** = 打开青蛙旅行：让对应 agent 在该项目中执行一次独立、只读探索，回来后展示明信片并累计成长 token。
+- 会话面板底部的 **🐱 闲逛** = 打开可见 CLI，不带项目、不带任务和工具，让猫猫自己随便想想、聊聊。
 - **右键** = 泡泡菜单；**拖动** = 移动位置。等授权/等回复时会**自动**弹允许/拒绝气泡。
 - 托盘菜单可开详情面板、静音、唤起 Claude、打开日志、**卸载钩子**、退出。
 - 详情面板里可切皮肤 / 模式 / 设 5h 预算。

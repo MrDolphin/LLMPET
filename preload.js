@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('pet', {
   onEvent: (cb) => ipcRenderer.on('pet:event', (_e, data) => cb(data)),
   onStats: (cb) => ipcRenderer.on('pet:stats', (_e, data) => cb(data)),
   onMeme: (cb) => ipcRenderer.on('pet:meme', (_e, data) => cb(data)),
+  onTravel: (cb) => ipcRenderer.on('pet:travel', (_e, data) => cb(data)),
   onMemeCatalogChanged: (cb) => ipcRenderer.on('pet:meme-catalog-changed', (_e, data) => cb(data)),
   onPanelStats: (cb) => ipcRenderer.on('panel:stats', (_e, data) => cb(data)),
   onConfig: (cb) => {
@@ -41,6 +42,11 @@ contextBridge.exposeInMainWorld('pet', {
   focusSession: (sessionId) => ipcRenderer.send('focus-session', sessionId),
   getMemeCatalog: () => ipcRenderer.invoke('meme-catalog'),
   triggerMeme: (sessionId, memeId) => ipcRenderer.invoke('meme-trigger', sessionId, memeId),
+  getTravel: () => ipcRenderer.invoke('travel-get'),
+  getTravelPostcards: () => ipcRenderer.invoke('travel-postcards'),
+  startTravel: (sessionId, templateId, mission) => ipcRenderer.invoke('travel-start', sessionId, templateId, mission),
+  wanderTravel: () => ipcRenderer.invoke('travel-wander'),
+  cancelTravel: () => ipcRenderer.invoke('travel-cancel'),
   // 左键主操作（非待处理情形）：由后端决定聚焦会话 / 开面板 / 新开 CLI
   primaryAction: () => ipcRenderer.send('primary-action'),
   // 透明空白处点击穿透：渲染端命中测试后切换（true=穿透，鼠标事件仍转发回来）

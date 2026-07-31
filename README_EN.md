@@ -13,6 +13,7 @@ The interface is available in **Simplified Chinese, English, and Japanese**. Swi
 - **Claude Code + Codex sessions** — one pet can watch both backends, or you can enable separate Claude and Codex pets with independent skins and positions.
 - **Session manager** — search and filter sessions, pin important work, archive noise, inspect context usage, and bring the selected terminal or desktop session forward.
 - **Meme actions** — send a GIF + voice line to the pet and continue the selected session with the corresponding structured prompt.
+- **Travel Frog** — send the selected Claude or Codex pet on an isolated, read-only project expedition and receive a local postcard when it returns.
 - **Usage dashboard** — inspect real token trends, model breakdowns, Claude API-price-equivalent estimates, a local Codex token ledger, rate-limit windows, diagnostics, and live operations.
 - **Three skins** — Octopus 🐙, Pixel Monster 👾, and Salary Cat 🐱.
 - **Patrol mode on macOS** — LLMPET can detect supported rival desktop pets, stay above them, and attempt to push their windows to the nearest screen edge.
@@ -32,6 +33,7 @@ LLMPET's state machine, metering, permission flow, process reconciliation, and d
 | <img src="assets/cat/cat-happy.gif" width="72" alt="Completed"> | 🎉 **Completed** | A turn has finished |
 | <img src="assets/cat/cat-error.gif" width="72" alt="Error"> | 💥 **Error** | A command or API request failed |
 | <img src="assets/cat/cat-loafing.gif" width="72" alt="Loafing"> | 🍦 **Loafing** | The previous step ended and nothing new is happening |
+| <img src="assets/cat/cat-roam.gif" width="72" alt="Traveling"> | 🧳 **Traveling** | A Travel Frog read-only expedition is in progress |
 | <img src="assets/cat/cat-sleeping.gif" width="72" alt="Sleeping"> | 😴 **Sleeping** | The session ended or has been inactive for a while |
 
 Salary Cat assets are credited to Douyin creator **@月薪喵**. See [`assets/cat/CREDITS.md`](assets/cat/CREDITS.md).
@@ -82,6 +84,17 @@ LLMPET does not install Codex hooks. It incrementally and read-only tails:
 
 It maps rollout events into the same state machine, filters internal subagent threads, restores long-running sessions without replaying old events, and builds a persistent local token ledger from each event's `last_token_usage`. Codex rate-limit windows remain separate; local history is not presented as an OpenAI bill.
 
+## Travel Frog
+
+Click **🧳** beside a session to send that session's Claude Code or Codex agent on a separate expedition in the same project directory. Choose Project scout, Bug hunt, Idea trail, or write a custom mission.
+
+- **🐱 Wander** at the bottom of the session panel is deliberately unrelated to every session and project. Without asking the user for a destination, it randomly chooses a real-world route such as A faraway window, A living craft, or A strange corner of Earth, then opens a visible Claude or Codex CLI and completes at least three legs before returning.
+- Wander exposes only public web search and page reading. It has no file, shell, login, form, or upload capability. If the selected CLI presents its native web-access approval, the user can allow or deny it in the visible terminal; a denial is not bypassed and does not lead to a request for broader access. Each trip leaves from its own retained footprint under `~/.octopus/wander-home/trips/`; recent routes and memories help prevent repetitive outings.
+- One trip can run at a time. It is cancellable and limited to 30 minutes.
+- The returned postcard, status, and exact invocation usage stay in `~/.octopus/travel.json` with `0600` permissions.
+- Every 10,000 travel tokens earns one leaf; 4 leaves become a star, 4 stars a moon, and 4 moons a sun.
+- LLMPET never starts a trip automatically. Only pressing **Depart** sends the mission and relevant project context through the selected agent's CLI to Anthropic or OpenAI.
+
 ## Meme actions
 
 Each meme is stored as structured data under:
@@ -112,7 +125,7 @@ Patrol mode is currently macOS-only.
 - The HTTP server binds only to `127.0.0.1`; write endpoints require a random per-run token in addition to loopback, Host, and browser-origin checks.
 - Session data, configuration, and usage history stay on the local machine.
 - Codex rollout access is read-only.
-- Pricing is the only optional network fetch: once every 24 hours LLMPET downloads public LiteLLM pricing data. Set `OCTOPUS_NO_NET=1` for fully offline mode.
+- Background network access is limited to the optional daily LiteLLM pricing download. A Travel Frog run contacts Anthropic or OpenAI only after you explicitly press **Depart**; `OCTOPUS_NO_NET=1` disables LLMPET's pricing fetch, but does not override a CLI trip you explicitly start.
 - Electron runs with `contextIsolation` enabled and `nodeIntegration` disabled.
 - Claude hook installation is merge-safe, atomic, reversible, and backed up before uninstall.
 
