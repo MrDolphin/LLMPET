@@ -20,6 +20,31 @@ html, body {
   justify-content: flex-end;
 }
 
+/* Screen-edge anchoring ----------------------------------------------------
+   The BrowserWindow stays fully inside the work area; the visible pet moves
+   to the relevant side *inside* that transparent window. This is what lets a
+   pet genuinely touch the top/left/right edge without sacrificing room for a
+   popup or circular menu. */
+#stage.edge-below { justify-content: flex-start; }
+#stage.edge-left { align-items: flex-start; }
+#stage.edge-right { align-items: flex-end; }
+
+#stage.edge-below #pixel,
+#stage.edge-below #mascot,
+#stage.edge-below #cat { order: 0; }
+#stage.edge-below .sessions { order: 1; margin-top: 3px; margin-bottom: 0; }
+#stage.edge-below .chip { order: 2; }
+#stage.edge-below .agent-tag { order: 3; }
+#stage.edge-below .bubble,
+#stage.edge-below .think { order: 4; margin-top: 8px; margin-bottom: 0; }
+
+#stage.edge-below .bubble::after {
+  top: -7px;
+  bottom: auto;
+  border-width: 0 7px 8px 7px;
+  border-color: transparent transparent rgba(255, 255, 255, 0.97) transparent;
+}
+
 /* ---------- 选项面板（点选答案） ---------- */
 .ask {
   max-width: 290px;
@@ -310,9 +335,16 @@ body.skin-cat #cat { display: flex; }
   display: flex;
   gap: 5px;
   align-items: center;
+  justify-content: center;
   margin-bottom: 3px;
   min-height: 12px;
 }
+/* Keep the session dots centred on the visible pet, not on the transparent
+   BrowserWindow. At a left/right edge both boxes share the same outer edge,
+   so matching their widths also matches their centres. */
+body.skin-pixel .sessions { width: 200px; }
+body.skin-mascot .sessions { width: 252px; }
+body.skin-cat .sessions { width: 120px; }
 .sess-dot {
   width: 9px; height: 9px;
   border-radius: 50%;
@@ -448,6 +480,7 @@ body.skin-cat #cat { display: flex; }
 .sleep .z1 { left: 0; font-size: 17px; animation-delay: 0s; }
 .sleep .z2 { left: 18px; font-size: 26px; animation-delay: 0.7s; }
 .sleep .z3 { left: 44px; font-size: 38px; animation-delay: 1.4s; }
+#stage.edge-below .sleep { top: 18px; bottom: auto; }
 @keyframes zRise {
   0% { opacity: 0; transform: translateY(8px) rotate(-12deg); }
   25% { opacity: 1; }
@@ -1261,6 +1294,17 @@ body.skin-cat #cat { display: flex; }
   bottom: 200px;
   max-height: calc(100vh - 224px);
 }
+
+/* At the top edge, keep the visible pet at y=0 and grow every card downward.
+   POPUP_BOTTOM in pet.js reserves the same 200px pet stack on either side. */
+#stage.edge-below .sesslist,
+#stage.edge-below .ask,
+#stage.edge-below .todopop {
+  top: 200px;
+  bottom: auto;
+}
+
+#stage.edge-below .notepad { top: 84px; bottom: auto; }
 
 /* 动态定高配套：问答卡片单独封顶，避免长任务把桌面纵向占满。 */
 .sesslist, .todopop { max-height: calc(100vh - 210px); }

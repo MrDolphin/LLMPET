@@ -71,5 +71,21 @@ assert(/\.sl-travel-history::-webkit-scrollbar\s*\{[^}]*width\s*:\s*6px\s*;/s.te
 assert(/class="sl-travel-library"[\s\S]*class="sl-travel-album"[\s\S]*id="sl-travel-history"[\s\S]*id="sl-travel-postcard"/s.test(html),
   'postcard history must precede the selected postcard inside the side-by-side library');
 assert(/const TRAVEL_POPUP_W = 760;/.test(js), 'travel library needs a wider surface than ordinary session popups');
+assert(/#stage\.edge-below\s*\{[^}]*justify-content\s*:\s*flex-start\s*;/s.test(css),
+  'top-edge mode must anchor the visible pet at the top of its transparent window');
+assert(/#stage\.edge-below \.sesslist,[\s\S]*#stage\.edge-below \.todopop\s*\{[^}]*top\s*:\s*200px\s*;[^}]*bottom\s*:\s*auto\s*;/s.test(css),
+  'cards must flip below a pet parked at the top edge');
+assert(/\.sessions\s*\{[^}]*justify-content\s*:\s*center\s*;/s.test(css),
+  'session dots must be centred inside the pet-width anchor');
+assert(/body\.skin-pixel \.sessions\s*\{[^}]*width\s*:\s*200px\s*;[^}]*\}/s.test(css)
+  && /body\.skin-mascot \.sessions\s*\{[^}]*width\s*:\s*252px\s*;[^}]*\}/s.test(css)
+  && /body\.skin-cat \.sessions\s*\{[^}]*width\s*:\s*120px\s*;[^}]*\}/s.test(css),
+  'each skin must align the session-dot box to its visible pet width');
+assert(/anchoredLayoutPayload/.test(js) && /choosePopupLayout/.test(js),
+  'renderer must preserve the visible pet anchor while changing popup direction');
+assert(/wr\.y\s*<=\s*wa\.y\s*\+\s*3[\s\S]*screenY\s*=\s*wa\.y/.test(js),
+  'a top-clamped transparent frame must snap the visible pet body to the work-area top');
+assert(/PetGeometry\.radialLayout/.test(js),
+  'right-click menu must use bounded edge-aware geometry');
 
 console.log('popup style checks passed');

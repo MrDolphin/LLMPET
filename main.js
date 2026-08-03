@@ -117,7 +117,32 @@ function targetSize(st) {
   return { w: BASE_W, h: BASE_H };
 }
 
-function applyPetSize(st) {
+function validPetAnchor(anchor) {
+  if (!anchor || typeof anchor !== 'object') return null;
+  const numeric = ['screenX', 'screenY', 'width', 'height', 'xOffset', 'yOffset'];
+  if (!numeric.every((key) => Number.isFinite(anchor[key]))) return null;
+  if (!(anchor.width > 0) || !(anchor.height > 0)) return null;
+  if (!['left', 'center', 'right'].includes(anchor.xAlign)) return null;
+  if (!['top', 'bottom'].includes(anchor.yAlign)) return null;
+  return anchor;
+}
+
+function anchoredPetOrigin(anchor, width, height) {
+  let localX;
+  if (anchor.xAlign === 'left') localX = anchor.xOffset;
+  else if (anchor.xAlign === 'right') localX = width - anchor.xOffset - anchor.width;
+  else localX = width / 2 + anchor.xOffset - anchor.width / 2;
+
+  const localY = anchor.yAlign === 'top'
+    ? anchor.yOffset
+    : height - anchor.yOffset - anchor.height;
+  return {
+    x: Math.round(anchor.screenX - localX),
+    y: Math.round(anchor.screenY - localY),
+  };
+}
+
+function applyPetSize(st, requestedAnchor) {
   if (!st || !st.win || st.win.isDestroyed()) return;
   const win = st.win;
   const { w } = targetSize(st);
@@ -127,17 +152,22 @@ function applyPetSize(st) {
   // pet / footer buttons off-screen — the popup scrolls internally instead.
   try {
     const wa = screen.getDisplayMatching(b).workArea;
+    const width = Math.min(w, wa.width);
     h = Math.min(h, wa.height);
+    const anchor = validPetAnchor(requestedAnchor);
+    const anchored = anchor ? anchoredPetOrigin(anchor, width, h) : null;
     const cx = b.x + b.width / 2;
     const bottom = b.y + b.height;
-    let x = Math.round(cx - w / 2);
-    let y = Math.round(bottom - h);
-    x = Math.min(Math.max(x, wa.x), wa.x + wa.width - w);
+    let x = anchored ? anchored.x : Math.round(cx - width / 2);
+    let y = anchored ? anchored.y : Math.round(bottom - h);
+    x = Math.min(Math.max(x, wa.x), wa.x + wa.width - width);
     y = Math.min(Math.max(y, wa.y), wa.y + wa.height - h);
-    win.setBounds({ x, y, width: w, height: h });
+    win.setBounds({ x, y, width, height: h });
   } catch {
+    const anchor = validPetAnchor(requestedAnchor);
+    const anchored = anchor ? anchoredPetOrigin(anchor, w, h) : null;
     const bottom = b.y + b.height;
-    win.setBounds({ x: b.x, y: Math.round(bottom - h), width: w, height: h });
+    win.setBounds({ x: anchored ? anchored.x : b.x, y: anchored ? anchored.y : Math.round(bottom - h), width: w, height: h });
   }
 }
 
@@ -984,11 +1014,11 @@ function registerIpc() {
 
   // Dynamic sizing: renderer measures the open popup and asks for an exact fit.
   // w/h <= 0 resets to the base pet size.
-  ipcMain.on('set-pet-size', (e, w, h) => {
+  ipcMain.on('set-pet-size', (e, w, h, anchor) => {
     const st = stateOfSender(e.sender) || primaryPetState();
     if (!st) return;
     st.customSize = (Number(w) > 0 && Number(h) > 0) ? { w: Number(w), h: Number(h) } : null;
-    applyPetSize(st);
+    applyPetSize(st, anchor);
   });
   // Back-compat coarse toggles (renderer now prefers set-pet-size).
   ipcMain.on('pet-tall', (e, on) => {

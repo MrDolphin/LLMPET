@@ -298,14 +298,128 @@ const MEME_GAP = 14;
 const MEME_EDGE_PAD = 10;
 let memeLayoutActive = false;
 let fitPopupSeq = 0;
-function setRequestedPetSize(w, h) {
+let edgeLayout = { vertical: 'above', horizontal: 'center' };
+
+function browserWorkArea() {
+  const s = window.screen || {};
+  const width = Number.isFinite(s.availWidth) ? s.availWidth : (window.innerWidth || 320);
+  const height = Number.isFinite(s.availHeight) ? s.availHeight : (window.innerHeight || 340);
+  return {
+    x: Number.isFinite(s.availLeft) ? s.availLeft : 0,
+    y: Number.isFinite(s.availTop) ? s.availTop : 0,
+    width,
+    height,
+  };
+}
+
+function petGeometrySnapshot() {
+  const el = curSkinEl();
+  if (!el || !Number.isFinite(window.screenX) || !Number.isFinite(window.screenY)) return null;
+  const rect = el.getBoundingClientRect();
+  const viewportW = Math.max(1, window.innerWidth || 320);
+  const viewportH = Math.max(1, window.innerHeight || 340);
+  return {
+    workArea: browserWorkArea(),
+    windowRect: { x: window.screenX, y: window.screenY, width: viewportW, height: viewportH },
+    petRect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+  };
+}
+
+function setStageEdgeLayout(next) {
+  const layout = next || edgeLayout;
+  edgeLayout = {
+    vertical: layout.vertical === 'below' ? 'below' : 'above',
+    horizontal: ['left', 'right'].includes(layout.horizontal) ? layout.horizontal : 'center',
+  };
+  stage.classList.toggle('edge-below', edgeLayout.vertical === 'below');
+  stage.classList.toggle('edge-left', edgeLayout.horizontal === 'left');
+  stage.classList.toggle('edge-right', edgeLayout.horizontal === 'right');
+}
+
+// Changing the flex anchor moves the pet inside the transparent BrowserWindow.
+// This payload lets the main process move/resize that window in the opposite
+// direction, so the visible pet stays on exactly the same screen pixel.
+function anchoredLayoutPayload(next) {
+  const before = petGeometrySnapshot();
+  if (!before) { setStageEdgeLayout(next); return null; }
+  const oldPet = before.petRect;
+  const wa = before.workArea;
+  const waRight = wa.x + wa.width;
+  const waBottom = wa.y + wa.height;
+  const wr = before.windowRect;
+  let screenX = wr.x + oldPet.x;
+  let screenY = wr.y + oldPet.y;
+
+  // A frame at the work-area edge plus a large transparent inset means the OS
+  // stopped the BrowserWindow before the user's visible pet reached the edge.
+  // Treat that as an explicit edge drag and snap the *pet body*, not the frame.
+  if (next.vertical === 'below' && wr.y <= wa.y + 3 && oldPet.y > 18) screenY = wa.y;
+  if (next.vertical === 'above' && wr.y + wr.height >= waBottom - 3 && wr.height - oldPet.y - oldPet.height > 18) {
+    screenY = waBottom - oldPet.height;
+  }
+  if (next.horizontal === 'left' && wr.x <= wa.x + 3 && oldPet.x > 18) screenX = wa.x;
+  if (next.horizontal === 'right' && wr.x + wr.width >= waRight - 3 && wr.width - oldPet.x - oldPet.width > 18) {
+    screenX = waRight - oldPet.width;
+  }
+  setStageEdgeLayout(next);
+  const rect = curSkinEl().getBoundingClientRect();
+  const viewportW = Math.max(1, window.innerWidth || 320);
+  const viewportH = Math.max(1, window.innerHeight || 340);
+  const xAlign = edgeLayout.horizontal;
+  const yAlign = edgeLayout.vertical === 'below' ? 'top' : 'bottom';
+  const xOffset = xAlign === 'left'
+    ? rect.left
+    : xAlign === 'right'
+      ? viewportW - rect.right
+      : rect.left + rect.width / 2 - viewportW / 2;
+  const yOffset = yAlign === 'top' ? rect.top : viewportH - rect.bottom;
+  return {
+    screenX, screenY,
+    width: rect.width, height: rect.height,
+    xAlign, yAlign, xOffset, yOffset,
+  };
+}
+
+function restingEdgeLayout() {
+  const snapshot = petGeometrySnapshot();
+  if (!snapshot || !window.PetGeometry) return edgeLayout;
+  let topThreshold = snapshot.petRect.y + 2;
+  if (edgeLayout.vertical === 'below') {
+    // Measure the real normal-layout inset for the current skin/status stack.
+    // A fixed number is wrong as soon as a chip/bubble changes height and can
+    // make pointerup flip the pet back too early.
+    const previous = { ...edgeLayout };
+    setStageEdgeLayout({ ...previous, vertical: 'above' });
+    topThreshold = curSkinEl().getBoundingClientRect().top + 2;
+    setStageEdgeLayout(previous);
+  }
+  return window.PetGeometry.chooseRestingLayout({
+    ...snapshot,
+    current: edgeLayout,
+    threshold: Math.max(24, topThreshold),
+  });
+}
+
+function popupEdgeLayout(height) {
+  const snapshot = petGeometrySnapshot();
+  if (!snapshot || !window.PetGeometry) return edgeLayout;
+  return window.PetGeometry.choosePopupLayout({
+    ...snapshot,
+    current: edgeLayout,
+    popupHeight: Math.max(80, (Number(height) || 340) - POPUP_BOTTOM),
+  });
+}
+
+function setRequestedPetSize(w, h, options = {}) {
   let width = Number(w) || 0;
   let height = Number(h) || 0;
   if (memeLayoutActive) {
     width = Math.max(width, MEME_WINDOW_W);
     height = Math.max(height, MEME_WINDOW_H);
   }
-  try { window.pet.setPetSize(width, height); } catch {}
+  const nextLayout = options.popup ? popupEdgeLayout(height) : restingEdgeLayout();
+  const anchor = anchoredLayoutPayload(nextLayout);
+  try { window.pet.setPetSize(width, height, anchor); } catch {}
 }
 function fitPopup(el) {
   if (!el) return;
@@ -324,7 +438,7 @@ function fitPopup(el) {
       el.style.maxHeight = prev;
       const viewportH = el === askEl ? Math.min(contentH, ASK_VIEWPORT_MAX_H) : contentH;
       const winH = Math.max(340, POPUP_BOTTOM + viewportH + 24);
-      setRequestedPetSize(popupW, winH);
+      setRequestedPetSize(popupW, winH, { popup: true });
     };
 
     const targetW = el === sesslist && slTravelView && !slTravelView.classList.contains('hidden')
@@ -332,7 +446,7 @@ function fitPopup(el) {
       : POPUP_W;
     if (Math.abs((window.innerWidth || 0) - targetW) > 2) {
       // 第一拍只扩宽，第二拍在正确的横向排版下测真实高度。
-      setRequestedPetSize(targetW, Math.max(340, window.innerHeight || 340));
+      setRequestedPetSize(targetW, Math.max(340, window.innerHeight || 340), { popup: true });
       requestAnimationFrame(() => requestAnimationFrame(measure));
     } else {
       measure();
@@ -343,6 +457,72 @@ function resetPetSize() {
   fitPopupSeq++;
   if (memeLayoutActive) setRequestedPetSize(MEME_WINDOW_W, MEME_WINDOW_H);
   else setRequestedPetSize(0, 0);
+}
+
+function settleEdgeLayout() {
+  // No screen coordinates in the headless renderer tests; the real Electron
+  // window always has them. This also avoids inventing a desktop in Node.
+  if (!petGeometrySnapshot()) return;
+  setRequestedPetSize(memeLayoutActive ? MEME_WINDOW_W : 0, memeLayoutActive ? MEME_WINDOW_H : 0);
+  requestAnimationFrame(reportPetVisualBounds);
+}
+
+// Switch the internal top/bottom anchor *during* a drag, just before the
+// transparent BrowserWindow reaches the work-area boundary. The visible pet
+// is kept on the same screen pixel and the gesture is rebased, so the next
+// pointer frame continues from there instead of producing edge -> pause ->
+// jump. Returning from the top probes the normal layout first and restores it
+// as soon as the whole frame can fit on-screen again.
+function movePetDuringDrag(gesture, e, targetX, targetY) {
+  const el = curSkinEl();
+  if (!el) {
+    window.pet.setWinPos(targetX, targetY);
+    return;
+  }
+  const before = el.getBoundingClientRect();
+  const petScreenX = targetX + before.left;
+  const petScreenY = targetY + before.top;
+  const wa = browserWorkArea();
+  let nextVertical = edgeLayout.vertical;
+
+  if (edgeLayout.vertical === 'above') {
+    nextVertical = window.PetGeometry
+      ? window.PetGeometry.chooseDragVerticalLayout({
+        current: 'above', workArea: wa, targetWindowY: targetY,
+        petScreenY, abovePetOffset: before.top,
+      })
+      : (targetY <= wa.y + 2 ? 'below' : 'above');
+  } else if (edgeLayout.vertical === 'below') {
+    const candidate = { ...edgeLayout, vertical: 'above' };
+    setStageEdgeLayout(candidate);
+    const normalRect = el.getBoundingClientRect();
+    const probed = window.PetGeometry
+      ? window.PetGeometry.chooseDragVerticalLayout({
+        current: 'below', workArea: wa, targetWindowY: targetY,
+        petScreenY, abovePetOffset: normalRect.top,
+      })
+      : (petScreenY - normalRect.top >= wa.y + 2 ? 'above' : 'below');
+    if (probed === 'above') {
+      nextVertical = 'above';
+    } else {
+      setStageEdgeLayout({ ...edgeLayout, vertical: 'below' });
+      nextVertical = 'below';
+    }
+  }
+
+  if (nextVertical !== edgeLayout.vertical) {
+    setStageEdgeLayout({ ...edgeLayout, vertical: nextVertical });
+  }
+  const after = el.getBoundingClientRect();
+  const anchoredX = petScreenX - after.left;
+  const anchoredY = petScreenY - after.top;
+
+  if (Math.abs(anchoredX - targetX) > 0.5 || Math.abs(anchoredY - targetY) > 0.5) {
+    gesture.win = [anchoredX, anchoredY];
+    gesture.sx = e.screenX;
+    gesture.sy = e.screenY;
+  }
+  window.pet.setWinPos(anchoredX, anchoredY);
 }
 
 // 从快照重建队列（多任务都在、且标明项目）
@@ -2491,7 +2671,7 @@ function attachDrag(el) {
     if (!g.moved && Math.abs(dx) + Math.abs(dy) > 4) g.moved = true;
     if (g.moved && g.win) {
       if (radialOpen) closeRadial();
-      window.pet.setWinPos(g.win[0] + dx, g.win[1] + dy);
+      movePetDuringDrag(g, e, g.win[0] + dx, g.win[1] + dy);
     }
   });
   el.addEventListener('pointerup', () => {
@@ -2500,14 +2680,22 @@ function attachDrag(el) {
     try { el.releasePointerCapture(g.pid); } catch {}
     el.classList.remove('dragging');
     g = null;
-    if (!wasMove) {
+    if (wasMove) {
+      // Let the final setBounds land, then exchange the internal top/bottom or
+      // left/right anchor without moving the visible pet.
+      setTimeout(settleEdgeLayout, 0);
+    } else {
       // 左键短按 = 会话列表 HUD（状态/会话名/上下文用量一览，点行聚焦该会话）。
       // 权限的允许/拒绝仍由 waiting 事件自动弹气泡，不走这里。
       if (radialOpen) closeRadial();
       else toggleSessList();
     }
   });
-  el.addEventListener('pointercancel', () => { if (g) el.classList.remove('dragging'); g = null; });
+  el.addEventListener('pointercancel', () => {
+    if (g) el.classList.remove('dragging');
+    g = null;
+    setTimeout(settleEdgeLayout, 0);
+  });
   // 右键 = 泡泡菜单
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -2691,12 +2879,36 @@ function buildRadial() {
   const cy = r.top - sr.top + r.height / 2;
   const items = MENU.filter((it) => !it.when || it.when()); // 平台不支持的项(如非 mac 的巡视)不渲染
   const n = items.length;
-  const radius = 96;
-  const startA = 192, endA = 348; // 头顶上方的弧
+  const viewportW = Math.max(1, window.innerWidth || 320);
+  const viewportH = Math.max(1, window.innerHeight || 340);
+  const wa = browserWorkArea();
+  const winX = Number.isFinite(window.screenX) ? window.screenX : wa.x;
+  const winY = Number.isFinite(window.screenY) ? window.screenY : wa.y;
+  const pad = 5;
+  // Intersect the BrowserWindow viewport with the actually visible work area.
+  // This protects old saved positions that may still have part of the
+  // transparent window off-screen before the first drag normalises them.
+  const safeRect = {
+    x: Math.max(pad, wa.x - winX + pad),
+    y: Math.max(pad, wa.y - winY + pad),
+    width: Math.max(46, Math.min(viewportW - pad, wa.x + wa.width - winX - pad) - Math.max(pad, wa.x - winX + pad)),
+    height: Math.max(46, Math.min(viewportH - pad, wa.y + wa.height - winY - pad) - Math.max(pad, wa.y - winY + pad)),
+  };
+  const preferred = [];
+  // A side-edge pet must fan into the desktop first. Trying the vertical fan
+  // before the inward fan is what created the clipped half-heart in corners.
+  if (edgeLayout.horizontal === 'left') preferred.push('right');
+  else if (edgeLayout.horizontal === 'right') preferred.push('left');
+  if (edgeLayout.vertical === 'below') preferred.push('below');
+  else preferred.push('above');
+  preferred.push(edgeLayout.vertical === 'below' ? 'above' : 'below');
+  const layout = window.PetGeometry
+    ? window.PetGeometry.radialLayout({ count: n, center: { x: cx, y: cy }, safeRect, preferred })
+    : { direction: 'above', points: [] };
   items.forEach((it, i) => {
-    const a = ((startA + (endA - startA) * (n === 1 ? 0.5 : i / (n - 1))) * Math.PI) / 180;
-    const x = cx + radius * Math.cos(a);
-    const y = cy + radius * Math.sin(a);
+    const point = layout.points[i] || { x: cx, y: cy };
+    const x = point.x;
+    const y = point.y;
     const b = document.createElement('div');
     b.className = 'radial-item';
     b.style.left = x + 'px';
@@ -2741,6 +2953,7 @@ function updateRadialBadge() {
 function openRadial() {
   if (todoPopOpen) closeTodoPop();
   if (sessListOpen) closeSessList();
+  settleEdgeLayout();
   buildRadial();
   radial.classList.remove('hidden');
   radialOpen = true;
@@ -2781,6 +2994,9 @@ window.addEventListener('blur', () => { if (radialOpen) closeRadial(); });
     window.OctoI18n.setLang(cfg.lang || 'zh');
     applySkin(cfg.skin || 'mascot');
   }
+  // Convert positions saved by older builds (which anchored the transparent
+  // window rather than the visible pet) as soon as the real skin is known.
+  requestAnimationFrame(settleEdgeLayout);
   applyStaticI18n();
   await loadMemeCatalog();
   const s = await window.pet.getStats();
