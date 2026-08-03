@@ -18,7 +18,15 @@
     return { x, y, width, height, right: x + width, bottom: y + height };
   }
 
-  function chooseRestingLayout({ workArea, windowRect, petRect, current, threshold = 168 }) {
+  function chooseRestingLayout({
+    workArea,
+    windowRect,
+    petRect,
+    current,
+    threshold = 168,
+    inferVerticalFrameClamp = true,
+    inferHorizontalFrameClamp = true,
+  }) {
     const wa = normalizeRect(workArea);
     const wr = normalizeRect(windowRect);
     const pr = normalizeRect(petRect);
@@ -41,16 +49,27 @@
     // The second half of each test catches the old failure mode: macOS has
     // already clamped the transparent window to the work-area edge, while the
     // visible pet is still stranded well inside that window.
-    if (pet.y - wa.y <= threshold || (wr.y <= wa.y + 3 && pr.y > 18)) vertical = 'below';
+    if (pet.y - wa.y <= threshold
+      || (inferVerticalFrameClamp && wr.y <= wa.y + 3 && pr.y > 18)) vertical = 'below';
 
-    if (pet.x - wa.x <= threshold || (wr.x <= wa.x + 3 && pr.x > 18)) horizontal = 'left';
-    else if (wa.right - pet.right <= threshold || (wr.right >= wa.right - 3 && wr.width - pr.right > 18)) horizontal = 'right';
+    if (pet.x - wa.x <= threshold
+      || (inferHorizontalFrameClamp && wr.x <= wa.x + 3 && pr.x > 18)) horizontal = 'left';
+    else if (wa.right - pet.right <= threshold
+      || (inferHorizontalFrameClamp && wr.right >= wa.right - 3 && wr.width - pr.right > 18)) horizontal = 'right';
     else if (pet.x - wa.x > threshold * 2 && wa.right - pet.right > threshold * 2) horizontal = 'center';
 
     return { vertical, horizontal };
   }
 
-  function choosePopupLayout({ workArea, windowRect, petRect, current, popupHeight = 140 }) {
+  function choosePopupLayout({
+    workArea,
+    windowRect,
+    petRect,
+    current,
+    popupHeight = 140,
+    inferVerticalFrameClamp = true,
+    inferHorizontalFrameClamp = true,
+  }) {
     const wa = normalizeRect(workArea);
     const wr = normalizeRect(windowRect);
     const pr = normalizeRect(petRect);
@@ -59,7 +78,14 @@
     const above = Math.max(0, petTop - wa.y);
     const below = Math.max(0, wa.bottom - petBottom);
     const need = Math.max(80, Number(popupHeight) || 0);
-    const resting = chooseRestingLayout({ workArea: wa, windowRect: wr, petRect: pr, current });
+    const resting = chooseRestingLayout({
+      workArea: wa,
+      windowRect: wr,
+      petRect: pr,
+      current,
+      inferVerticalFrameClamp,
+      inferHorizontalFrameClamp,
+    });
 
     let vertical = resting.vertical;
     if (above < need && below > above) vertical = 'below';

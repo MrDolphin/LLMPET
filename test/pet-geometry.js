@@ -53,6 +53,20 @@ assert.strictEqual(
   'pointerup must not restore the above layout before its real inset fits',
 );
 
+assert.deepStrictEqual(
+  geometry.chooseRestingLayout({
+    workArea,
+    windowRect: { x: 460, y: 24, width: 520, height: 760 },
+    petRect: { x: 200, y: 480, width: 120, height: 120 },
+    current: { vertical: 'above', horizontal: 'center' },
+    threshold: 218,
+    inferVerticalFrameClamp: false,
+    inferHorizontalFrameClamp: false,
+  }),
+  { vertical: 'above', horizontal: 'center' },
+  'a tall popup clamped to the screen top must not masquerade as a pet edge drag',
+);
+
 assert.strictEqual(
   geometry.chooseDragVerticalLayout({
     current: 'above', workArea, targetWindowY: 24, petScreenY: 204, abovePetOffset: 180,

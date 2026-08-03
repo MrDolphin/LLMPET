@@ -83,6 +83,12 @@ assert(/body\.skin-pixel \.sessions\s*\{[^}]*width\s*:\s*200px\s*;[^}]*\}/s.test
   'each skin must align the session-dot box to its visible pet width');
 assert(/anchoredLayoutPayload/.test(js) && /choosePopupLayout/.test(js),
   'renderer must preserve the visible pet anchor while changing popup direction');
+assert(/compactVerticalFrame\s*&&\s*next\.vertical\s*===\s*'below'/s.test(js)
+  && /compactHorizontalFrame\s*&&\s*next\.horizontal\s*===\s*'left'/s.test(js),
+  'popup-sized frames must never trigger legacy edge-drag snapping while they collapse');
+assert(/frameHeightExcess\s*=\s*Math\.max\(0,\s*snapshot\.windowRect\.height\s*-\s*BASE_PET_FRAME_H\)/s.test(js)
+  && /snapshot\.petRect\.y\s*-\s*frameHeightExcess\s*\+\s*2/s.test(js),
+  'closing a tall popup must compare the pet against its base-frame inset, not its expanded local y');
 assert(/wr\.y\s*<=\s*wa\.y\s*\+\s*3[\s\S]*screenY\s*=\s*wa\.y/.test(js),
   'a top-clamped transparent frame must snap the visible pet body to the work-area top');
 assert(/PetGeometry\.radialLayout/.test(js),

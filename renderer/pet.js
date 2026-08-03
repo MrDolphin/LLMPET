@@ -296,6 +296,9 @@ const MEME_WINDOW_H = 340;
 const MEME_MEDIA_W = 260;
 const MEME_GAP = 14;
 const MEME_EDGE_PAD = 10;
+const BASE_PET_FRAME_H = 340;
+const RESTING_FRAME_MAX_W = 360;
+const RESTING_FRAME_MAX_H = 360;
 let memeLayoutActive = false;
 let fitPopupSeq = 0;
 let edgeLayout = { vertical: 'above', horizontal: 'center' };
@@ -347,18 +350,22 @@ function anchoredLayoutPayload(next) {
   const waRight = wa.x + wa.width;
   const waBottom = wa.y + wa.height;
   const wr = before.windowRect;
+  const compactHorizontalFrame = wr.width <= RESTING_FRAME_MAX_W;
+  const compactVerticalFrame = wr.height <= RESTING_FRAME_MAX_H;
   let screenX = wr.x + oldPet.x;
   let screenY = wr.y + oldPet.y;
 
   // A frame at the work-area edge plus a large transparent inset means the OS
   // stopped the BrowserWindow before the user's visible pet reached the edge.
   // Treat that as an explicit edge drag and snap the *pet body*, not the frame.
-  if (next.vertical === 'below' && wr.y <= wa.y + 3 && oldPet.y > 18) screenY = wa.y;
-  if (next.vertical === 'above' && wr.y + wr.height >= waBottom - 3 && wr.height - oldPet.y - oldPet.height > 18) {
+  if (compactVerticalFrame && next.vertical === 'below' && wr.y <= wa.y + 3 && oldPet.y > 18) screenY = wa.y;
+  if (compactVerticalFrame && next.vertical === 'above'
+    && wr.y + wr.height >= waBottom - 3 && wr.height - oldPet.y - oldPet.height > 18) {
     screenY = waBottom - oldPet.height;
   }
-  if (next.horizontal === 'left' && wr.x <= wa.x + 3 && oldPet.x > 18) screenX = wa.x;
-  if (next.horizontal === 'right' && wr.x + wr.width >= waRight - 3 && wr.width - oldPet.x - oldPet.width > 18) {
+  if (compactHorizontalFrame && next.horizontal === 'left' && wr.x <= wa.x + 3 && oldPet.x > 18) screenX = wa.x;
+  if (compactHorizontalFrame && next.horizontal === 'right'
+    && wr.x + wr.width >= waRight - 3 && wr.width - oldPet.x - oldPet.width > 18) {
     screenX = waRight - oldPet.width;
   }
   setStageEdgeLayout(next);
@@ -383,20 +390,26 @@ function anchoredLayoutPayload(next) {
 function restingEdgeLayout() {
   const snapshot = petGeometrySnapshot();
   if (!snapshot || !window.PetGeometry) return edgeLayout;
-  let topThreshold = snapshot.petRect.y + 2;
+  // In an expanded popup the bottom-anchored pet's local y grows by exactly
+  // the extra window height. Remove that artificial offset before deciding
+  // whether the visible pet itself is actually in the top-edge zone.
+  const frameHeightExcess = Math.max(0, snapshot.windowRect.height - BASE_PET_FRAME_H);
+  let topThreshold = snapshot.petRect.y - frameHeightExcess + 2;
   if (edgeLayout.vertical === 'below') {
     // Measure the real normal-layout inset for the current skin/status stack.
     // A fixed number is wrong as soon as a chip/bubble changes height and can
     // make pointerup flip the pet back too early.
     const previous = { ...edgeLayout };
     setStageEdgeLayout({ ...previous, vertical: 'above' });
-    topThreshold = curSkinEl().getBoundingClientRect().top + 2;
+    topThreshold = curSkinEl().getBoundingClientRect().top - frameHeightExcess + 2;
     setStageEdgeLayout(previous);
   }
   return window.PetGeometry.chooseRestingLayout({
     ...snapshot,
     current: edgeLayout,
     threshold: Math.max(24, topThreshold),
+    inferVerticalFrameClamp: snapshot.windowRect.height <= RESTING_FRAME_MAX_H,
+    inferHorizontalFrameClamp: snapshot.windowRect.width <= RESTING_FRAME_MAX_W,
   });
 }
 
@@ -407,6 +420,8 @@ function popupEdgeLayout(height) {
     ...snapshot,
     current: edgeLayout,
     popupHeight: Math.max(80, (Number(height) || 340) - POPUP_BOTTOM),
+    inferVerticalFrameClamp: snapshot.windowRect.height <= RESTING_FRAME_MAX_H,
+    inferHorizontalFrameClamp: snapshot.windowRect.width <= RESTING_FRAME_MAX_W,
   });
 }
 
