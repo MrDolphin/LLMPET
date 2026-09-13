@@ -155,21 +155,10 @@ const WHALE_POOLS = {
   ],
 };
 
-// DeepSeek 女仆逐帧版：独立于原 whale 的 23 动作包。逐项对应月薪喵源动作，
-// 因而使用 CAT 的状态/轮换结构，不能套用 whale 中曾交换过的动作位。
-// 素材按交付原字节保留；sweeping 为 V6，loafing 为 V4，working-4 为 V10。
-const DEEPSEEK_MAID_STATES = Object.fromEntries(
-  Object.entries(CAT_STATES).map(([state, file]) => [state, file.replace(/^cat-/, 'deepseek-maid-')]),
-);
-const DEEPSEEK_MAID_POOLS = Object.fromEntries(
-  Object.entries(CAT_POOLS).map(([state, files]) => [state, files.map((file) => file.replace(/^cat-/, 'deepseek-maid-'))]),
-);
-
 // meme 类皮肤共用一条渲染分支，彼此的差别全部收在这张表里。
 const MEME_PACKS = {
   cat: { dir: 'cat', states: CAT_STATES, pools: CAT_POOLS },
   whale: { dir: 'whale', states: WHALE_STATES, pools: WHALE_POOLS },
-  'deepseek-maid': { dir: 'deepseek-maid', states: DEEPSEEK_MAID_STATES, pools: DEEPSEEK_MAID_POOLS },
 };
 const isMeme = () => Object.prototype.hasOwnProperty.call(MEME_PACKS, skin);
 const memePack = () => MEME_PACKS[skin] || MEME_PACKS.cat;
@@ -3916,7 +3905,6 @@ function applySkin(s) {
   document.body.classList.toggle('skin-mascot', skin === 'mascot');
   document.body.classList.toggle('skin-cat', isMeme());
   document.body.classList.toggle('skin-whale', skin === 'whale');
-  document.body.classList.toggle('skin-deepseek-maid', skin === 'deepseek-maid');
   if (skin === 'mascot') updateMascotEyes(state);
   if (isMeme()) updateCat(state);
   syncErrorRibbons();
@@ -4266,7 +4254,7 @@ const MENU = [
 ];
 
 function toggleSkin() {
-  const order = ['mascot', 'pixel', ...Object.keys(MEME_PACKS)];
+  const order = ['mascot', 'pixel', 'cat', 'whale'];
   const next = order[(order.indexOf(skin) + 1) % order.length];
   applySkin(next);
   window.pet.setSkin(next);
