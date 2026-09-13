@@ -20,7 +20,6 @@ LLMPET 已支持 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 - **零配置监听 dsh**：支持 zstd 分帧的 `session.jsonl.zstd` 与纯文本 `session.jsonl`，未知日志版本会 fail-closed，不猜格式。
 - **独立 dsh 桌宠**：托盘勾选 **🌊 dsh 桌宠**，就能给 Harness 单独一只宠物、皮肤、位置和名牌；不打开分身时，主宠也能监看 dsh。
 - **鲸鱼女仆（whale）皮肤**：可用于主宠、Codex 宠或 dsh 宠；23 张动画覆盖完整工作流，不再只有一张静态形象。
-- **DeepSeek 女仆（逐帧版，`deepseek-maid`）**：新增独立的 23 动作包，与原鲸鱼女仆并存。保留参考动作的逐帧时序，包含 V6 喷雾循环修复、V4 鲸尾/眼睛动作和已确认 V10 键盘/鼠标动作；从托盘“形象”或桌宠菜单切换，不自动更改现有选择。[预览与版本记录](assets/deepseek-maid/CREDITS.md)
 - **会话可见、可搜索、可交接**：dsh 会话进入统一会话列表与本机档案馆，也可作为来源交给 Claude Code 或 Codex 继续。当前不把 dsh 宣称为接管目标，准确边界见后文。
 
 > 从 DeepSeek Harness / dsh 搜过来的？安装 LLMPET 后启动一次 dsh 会话即可被感知。觉得这只会汇报进度的鲸鱼娘有用，欢迎点一下页面顶部的 **Star** ⭐

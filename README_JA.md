@@ -15,7 +15,6 @@ LLMPET は [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)�
 - **設定不要の dsh 監視** — zstd フレーム形式の `session.jsonl.zstd` とプレーンな `session.jsonl` に対応し、未知のログ version は推測せず fail-closed で扱います。
 - **独立した dsh ペット** — トレイで **🌊 dsh ペット** を有効にすると、専用のペット、スキン、位置、名札を使えます。分身をオフにした場合も本体ペットが dsh を監視できます。
 - **クジラメイド（`whale`）スキン** — 本体、Codex、dsh のどのペットにも選択でき、静止画一枚ではなく 23 個のアニメーションで作業全体を表現します。
-- **DeepSeek メイド（フレーム再現版、`deepseek-maid`）** — 既存のクジラメイドとは別の 23 アクションセット。元のフレーム時間を保ち、V6 スプレーループ修正、V4 尾びれ・目の動き、確認済み V10 キーボード・マウス動作を収録しています。トレイの「見た目」またはペットのメニューから選択でき、現在の設定は変更しません。[プレビューと制作記録](assets/deepseek-maid/CREDITS.md)
 - **検索・保管・引き継ぎ** — dsh Session は統合ワークスペースとローカル保管庫に表示され、Claude Code または Codex への引き継ぎ元にできます。現在 dsh は接管先としては案内していません。正確な範囲は後述します。
 
 > DeepSeek Harness / dsh を検索して来ましたか？LLMPET の導入後に dsh Session を一度起動すれば、ペットが検出します。進捗を知らせるクジラが役に立ちそうなら、ぜひ **Star** ⭐ をお願いします。
