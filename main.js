@@ -1857,18 +1857,21 @@ function refreshTrayMenu() {
       { label: t('skin.pixel'), type: 'radio', checked: skin === 'pixel', click: () => applySkin('pixel') },
       { label: t('skin.cat'), type: 'radio', checked: skin === 'cat', click: () => applySkin('cat') },
       { label: t('skin.whale'), type: 'radio', checked: skin === 'whale', click: () => applySkin('whale') },
+      { label: t('skin.deepseek-maid'), type: 'radio', checked: skin === 'deepseek-maid', click: () => applySkin('deepseek-maid') },
     ] },
     ...(petMode === 'duo' ? [{ label: t('tray.skinCodex'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skinCodex === 'mascot', click: () => applySkin('mascot', 'codex') },
       { label: t('skin.pixel'), type: 'radio', checked: skinCodex === 'pixel', click: () => applySkin('pixel', 'codex') },
       { label: t('skin.cat'), type: 'radio', checked: skinCodex === 'cat', click: () => applySkin('cat', 'codex') },
       { label: t('skin.whale'), type: 'radio', checked: skinCodex === 'whale', click: () => applySkin('whale', 'codex') },
+      { label: t('skin.deepseek-maid'), type: 'radio', checked: skinCodex === 'deepseek-maid', click: () => applySkin('deepseek-maid', 'codex') },
     ] }] : []),
     ...(dshPet ? [{ label: t('tray.skinDsh'), submenu: [
       { label: t('skin.mascot'), type: 'radio', checked: skinDsh === 'mascot', click: () => applySkin('mascot', 'dsh') },
       { label: t('skin.pixel'), type: 'radio', checked: skinDsh === 'pixel', click: () => applySkin('pixel', 'dsh') },
       { label: t('skin.cat'), type: 'radio', checked: skinDsh === 'cat', click: () => applySkin('cat', 'dsh') },
       { label: t('skin.whale'), type: 'radio', checked: skinDsh === 'whale', click: () => applySkin('whale', 'dsh') },
+      { label: t('skin.deepseek-maid'), type: 'radio', checked: skinDsh === 'deepseek-maid', click: () => applySkin('deepseek-maid', 'dsh') },
     ] }] : []),
     { label: t('tray.shape'), submenu: [
       { label: t('shape.pet'), type: 'radio', checked: mode === 'pet', click: () => applyMode('pet') },
