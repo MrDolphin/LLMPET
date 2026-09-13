@@ -136,9 +136,9 @@ async function main() {
       assert(oi && Array.isArray(oi.RENDER_STATE_WORDS));
       assert.deepStrictEqual(oi.RENDER_STATE_WORDS, States.RENDER_STATE_WORDS);
     });
-    check('cat/whale 每个可见表情状态都有真实 GIF', () => {
+    check('每套 meme 皮肤的可见表情状态都有真实 GIF', () => {
       const w = world();
-      const packs = vm.runInContext('({ cat: { states: CAT_STATES, pools: CAT_POOLS }, whale: { states: WHALE_STATES, pools: WHALE_POOLS } })', w.sandbox);
+      const packs = vm.runInContext('MEME_PACKS', w.sandbox);
       const required = [
         'idle', 'roam', 'working', 'thinking', 'talking', 'juggling', 'sweeping',
         'waiting', 'needsinput', 'happy', 'greet', 'attention', 'sleeping', 'error',
