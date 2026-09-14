@@ -15,6 +15,7 @@ LLMPET now supports [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-h
 - **Zero-config dsh monitoring** — supports framed zstd `session.jsonl.zstd` and plain `session.jsonl`; unknown log versions fail closed instead of being guessed.
 - **A separate dsh pet** — enable **🌊 dsh pet** in the tray for its own pet, skin, position, and name tag. The main pet can monitor dsh when the split pet is off.
 - **Whale Maid (`whale`) skin** — selectable for the main, Codex, or dsh pet, with 23 animations covering the full workflow rather than one static mascot.
+- **DeepSeek Maid (Transparent Remix, `deepseek-maid`)** — 23 transparent GIFs alongside the original Whale Maid. Preserves all 731 frame delays, the V6 spray loop, V4 tail/eyes, V10 keyboard/mouse motion, and white foreground props. Select it from the tray Skin menu or the pet's skin cycle; existing choices stay unchanged. [Preview and provenance](assets/deepseek-maid/CREDITS.md)
 - **Searchable and handoff-ready sessions** — dsh sessions appear in the unified workspace and local archive, and can be handed to Claude Code or Codex as a source. dsh is not currently advertised as a takeover target; see the exact boundary below.
 
 > Arrived here while searching for DeepSeek Harness or dsh? Start one dsh session after installing LLMPET and the pet will pick it up. If a whale that reports your agent's progress sounds useful, please leave a **Star** ⭐

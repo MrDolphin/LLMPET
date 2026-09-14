@@ -35,6 +35,11 @@ assert.deepStrictEqual(
 assert.strictEqual(sanitize({ skin: 'unknown-skin' }).skin, 'mascot',
   'unknown skins must still fail closed to the default');
 
+const maidCfg = sanitize({ skin: 'deepseek-maid', skinCodex: 'deepseek-maid', skinDsh: 'deepseek-maid' });
+assert.deepStrictEqual([maidCfg.skin, maidCfg.skinCodex, maidCfg.skinDsh],
+  ['deepseek-maid', 'deepseek-maid', 'deepseek-maid'],
+  'the separate frame-remix pack must persist for all three pet roles');
+
 const root = path.join(__dirname, '..');
 const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
