@@ -49,6 +49,7 @@ function gifMetadata(bytes, inspectFrame) {
   assert(/^GIF8[79]a$/.test(bytes.subarray(0, 6).toString('ascii')));
   const size = [bytes.readUInt16LE(6), bytes.readUInt16LE(8)];
   let p = 13 + ((bytes[10] & 0x80) ? 3 * (1 << ((bytes[10] & 7) + 1)) : 0);
+  const globalPalette = bytes.subarray(13, p);
   const delaysMs = [];
   let delay = null;
   let control = null;
@@ -94,7 +95,9 @@ function gifMetadata(bytes, inspectFrame) {
       assert(control && control.transparent, 'every frame needs a real transparency index');
       assert.strictEqual(control.disposal, 2, 'full-frame clear prevents animation/loop trails');
       assert.deepStrictEqual([left, top, width, height], [0, 0, ...size], 'independent full frames are required');
-      if (inspectFrame) inspectFrame(pixels, control.index, width);
+      if (inspectFrame) inspectFrame(pixels, control.index, width, {
+        frameIndex: delaysMs.length, packed, globalPalette,
+      });
       const transparentPixels = pixels.reduce((n, pixel) => n + (pixel === control.index ? 1 : 0), 0);
       assert(transparentPixels > width * height * .01, 'transparent flag must refer to actual empty pixels');
       assert(transparentPixels < width * height * .99, 'not an empty animation frame');
@@ -110,6 +113,50 @@ function gifMetadata(bytes, inspectFrame) {
   return { size, delaysMs, loop, frameCount: delaysMs.length, transparentPixelCounts, controlOffsets };
 }
 
+// These revisions use one global palette and a fixed transparent index, so
+// decoded index equality also establishes identical visible color and alpha.
+function assertMotionRepair(action, decoded) {
+  const first = decoded[0];
+  assert(first, 'motion repair must contain frames');
+  if (action === 'thinking-2') {
+    assert.strictEqual(decoded.length, 32);
+    for (const [i, pixels] of decoded.entries()) {
+      assert.deepStrictEqual(pixels.subarray(180 * 360), first.subarray(180 * 360),
+        'bubble animation must not redraw or move the body');
+      if (i < 4 || i >= 20) {
+        assert(pixels.subarray(0, 180 * 360).every(p => p === 255),
+          'empty holds must contain no text cloud or residual bubbles');
+      } else {
+        assert(pixels.subarray(0, 180 * 360).some(p => p !== 255),
+          'each active bubble phase must actually be visible');
+      }
+    }
+    assert.deepStrictEqual(decoded[31], first, 'bubble loop seam must be identical');
+  } else if (action === 'sleeping-2') {
+    assert.strictEqual(decoded.length, 63);
+    for (const pixels of decoded) {
+      for (const [left, top, right, bottom] of [[48, 280, 247, 341], [34, 157, 68, 258]]) {
+        for (let y = top; y < bottom; y++) {
+          assert.deepStrictEqual(pixels.subarray(y * 360 + left, y * 360 + right),
+            first.subarray(y * 360 + left, y * 360 + right), 'sleeping feet and chair must stay fixed');
+        }
+      }
+    }
+    // The original action resets from the eye mask to preparation at the wrap.
+    // Only the final repeated breathing sequence has a fixed upper body.
+    for (const pixels of decoded.slice(42)) {
+      for (let y = 0; y < 360; y++) {
+        for (let x = 0; x < 360; x++) {
+          // Include the 3 px feather around the localized breath polygon.
+          if (x >= 121 && x <= 210 && y >= 210 && y <= 252) continue;
+          assert.strictEqual(pixels[y * 360 + x], decoded[42][y * 360 + x],
+            'late sleeping identity must stay fixed outside the breathing patch');
+        }
+      }
+    }
+  }
+}
+
 assert.strictEqual(manifest.id, 'deepseek-maid');
 assert.strictEqual(manifest.background, 'transparent');
 assert.strictEqual(manifest.animationCount, 23);
@@ -122,12 +169,45 @@ for (const animation of manifest.animations) {
   const bytes = fs.readFileSync(path.join(assetDir, animation.file));
   assert.strictEqual(crypto.createHash('sha256').update(bytes).digest('hex'), animation.sha256,
     `${animation.file} must be the byte-identical selected delivery`);
-  const meta = gifMetadata(bytes, animation.action === 'sweeping' ? (pixels, transparentIndex, width) => {
-    for (const x of [130, 145, 195, 205]) {
-      assert.notStrictEqual(pixels[330 * width + x], transparentIndex,
-        'the clipped white apron must remain opaque in every sweeping frame');
+  const repaired = ['sleeping-2', 'thinking-2'].includes(animation.action);
+  const decoded = [];
+  const meta = gifMetadata(bytes, (pixels, transparentIndex, width, details) => {
+    if (animation.action === 'sweeping') {
+      for (const x of [130, 145, 195, 205]) {
+        assert.notStrictEqual(pixels[330 * width + x], transparentIndex,
+          'the clipped white apron must remain opaque in every sweeping frame');
+      }
     }
-  } : null);
+    if (repaired) {
+      assert.strictEqual(details.packed & 0xc0, 0, 'repairs require a non-interlaced shared palette');
+      assert.strictEqual(details.globalPalette.length, 768);
+      assert.strictEqual(transparentIndex, 255);
+      for (const index of new Set(pixels)) {
+        if (index === transparentIndex) continue;
+        const [r, g, b] = details.globalPalette.subarray(index * 3, index * 3 + 3);
+        assert(!(g > r + 15 && g > b + 15 && g > 50), 'no green in repaired GIFs');
+      }
+      decoded.push(pixels);
+    }
+  });
+  if (repaired) {
+    assertMotionRepair(animation.action, decoded);
+    const hashes = decoded.map(p => crypto.createHash('sha256').update(p).digest('hex'));
+    const unique = [...new Set(hashes)];
+    assert.strictEqual(unique.length, animation.uniqueFrameCount);
+    assert.deepStrictEqual(hashes.map(h => unique.indexOf(h)), animation.repair.framePoseMap);
+    const broken = decoded.map(p => p.slice());
+    if (animation.action === 'thinking-2') {
+      broken[1][300 * 360 + 150] ^= 1;
+      assert.throws(() => assertMotionRepair(animation.action, broken), /must not redraw or move/);
+      const residue = decoded.map(p => p.slice());
+      residue[31][50 * 360 + 80] = 0;
+      assert.throws(() => assertMotionRepair(animation.action, residue), /no text cloud or residual/);
+    } else {
+      broken[1][300 * 360 + 150] ^= 1;
+      assert.throws(() => assertMotionRepair(animation.action, broken), /feet and chair must stay fixed/);
+    }
+  }
   assert.deepStrictEqual(meta.size, [360, 360]);
   assert.strictEqual(meta.frameCount, animation.frameCount);
   assert(meta.frameCount > 1, 'not a static replacement');
@@ -199,7 +279,7 @@ const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
 for (const suffix of ['', ", 'codex'", ", 'dsh'"]) {
   assert(main.includes(`applySkin('deepseek-maid'${suffix})`), 'tray must expose the pack to every pet role');
 }
-console.log('deepseek-maid: 23 transparent animations, 731 decoded alpha frames, safe disposal, exact timeline, every state/pool, three roles, and skin switching passed');
+console.log('deepseek-maid: 23 transparent animations, 731 decoded alpha frames, safe disposal, exact timeline, stable sleeping anchors, fixed-body head bubbles, every state/pool, three roles, and skin switching passed');
 // The real renderer starts recurring UI timers. This standalone test has
 // completed all synchronous assertions; don't keep npm test alive on them.
 process.exit(0);
